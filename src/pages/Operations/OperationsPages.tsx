@@ -108,7 +108,13 @@ export function SalesPage() {
   useEffect(() => { db.sales.reverse().toArray().then(setItems) }, [])
   const reprint = async (sale: any) => {
     const saleItems = await db.saleItems.where('saleId').equals(sale.id).toArray()
-    printSale(sale, saleItems, '80mm')
+    const shop = await db.settings.get('shop')
+    printSale(sale, saleItems, '80mm', {
+      name: shop?.shopName || 'WineBar POS',
+      address: shop?.address || '',
+      phone: shop?.phone || '',
+      gst: shop?.gst || '',
+    })
   }
   const exportRows = items.map((sale) => [sale.invoiceNumber,new Date(sale.createdAt).toLocaleString('en-IN'),sale.cashierName,sale.payments.map((p: any) => p.method).join(' + '),(sale.total/100).toFixed(2)])
   const exportAll = (kind: 'csv'|'excel'|'pdf') => {

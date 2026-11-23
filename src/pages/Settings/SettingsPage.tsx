@@ -75,6 +75,7 @@ export default function SettingsPage() {
           <label>Sync API key<input type="password" value={form.syncApiKey} onChange={(event) => setForm({ ...form, syncApiKey: event.target.value })} placeholder="Same value as SYNC_API_KEY on Vercel"/></label>
         </div>
         <p className="settings-note">Sync settings are stored in this browser only. Enter the same API key on each device to share products.</p>
+        <p className="settings-note">Receipts print at 80mm through the browser dialog. Connect the USB printer and select it with 80mm paper configured.</p>
         {saveMessage && <p className={`settings-feedback${saveMessage.error ? ' error' : ''}`} role={saveMessage.error ? 'alert' : 'status'}>{saveMessage.text}</p>}
         <button className="primary" type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save settings'}</button>
       </form>

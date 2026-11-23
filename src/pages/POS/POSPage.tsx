@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { Minus, Plus, Trash2, Search, Barcode, CreditCard, Banknote, X } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Minus, Plus, Trash2, Search, Barcode, CreditCard, Banknote, X, Camera } from 'lucide-react'
+import type { IScannerControls } from '@zxing/browser'
 import { db } from '../../db/database'
 import { useCartStore } from '../../stores/cartStore'
 import { completeSale } from '../../services/saleService'
@@ -14,12 +15,17 @@ export default function POSPage() {
   const [search, setSearch] = useState('')
   const [barcode, setBarcode] = useState('')
   const [message, setMessage] = useState('')
+  const [cameraOpen, setCameraOpen] = useState(false)
+  const [cameraError, setCameraError] = useState('')
   const [cartOpen, setCartOpen] = useState(false)
   const [paymentOpen, setPaymentOpen] = useState(false)
   const [method, setMethod] = useState<'CASH' | 'UPI' | 'CARD' | 'OTHER'>('CASH')
   const [cashReceived, setCashReceived] = useState('')
   const [printReceipt, setPrintReceipt] = useState(true)
   const searchRef = useRef<HTMLInputElement>(null)
+  const barcodeRef = useRef<HTMLInputElement>(null)
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const barcodeHandlerRef = useRef<(value: string) => void>(() => {})
   const cart = useCartStore()
   const authUser = useAuthStore((state) => state.user)
 
@@ -31,6 +37,10 @@ export default function POSPage() {
     loadCatalog()
     window.addEventListener('winebar:catalog-updated', loadCatalog)
     return () => window.removeEventListener('winebar:catalog-updated', loadCatalog)
+  }, [])
+
+  useEffect(() => {
+    if (window.matchMedia('(min-width: 761px)').matches) barcodeRef.current?.focus()
   }, [])
 
   useEffect(() => {
@@ -51,7 +61,7 @@ export default function POSPage() {
     return matchesCategory && matchesSearch
   }), [products, categoryId, search])
 
-  const addProduct = (product: Product) => {
+  const addProduct = useCallback((product: Product) => {
     const error = cart.add({
       productId: product.id, name: product.name, brand: product.brand,
       bottleSize: product.bottleSize, barcode: product.barcode,
@@ -59,16 +69,62 @@ export default function POSPage() {
       availableStock: product.currentStock,
     })
     setMessage(error || '')
-  }
+  }, [cart])
+
+  const handleBarcode = useCallback((value: string) => {
+    const code = value.trim()
+    if (!code) return
+    const product = products.find((item) => item.barcode === code)
+    if (!product) setMessage('Barcode not found or product is inactive')
+    else addProduct(product)
+    setBarcode('')
+  }, [products, addProduct])
+
+  useEffect(() => {
+    barcodeHandlerRef.current = handleBarcode
+  }, [handleBarcode])
 
   const scanBarcode = () => {
-    const code = barcode.trim()
-    if (!code) return
-    const product = products.find((value) => value.barcode === code)
-    if (!product) { setMessage('Barcode not found or product is inactive'); setBarcode(''); return }
-    addProduct(product)
-    setBarcode('')
+    handleBarcode(barcode)
+    barcodeRef.current?.focus()
   }
+
+  useEffect(() => {
+    if (!cameraOpen || !videoRef.current) return
+    if (!navigator.mediaDevices?.getUserMedia || !window.isSecureContext) {
+      return
+    }
+
+    const video = videoRef.current
+    let cancelled = false
+    let scanned = false
+    let controls: IScannerControls | undefined
+
+    const startCamera = async () => {
+      try {
+        const { BrowserMultiFormatReader } = await import('@zxing/browser')
+        if (cancelled) return
+        const reader = new BrowserMultiFormatReader()
+        const startedControls = await reader.decodeFromVideoDevice(undefined, video, (result) => {
+          if (!result || cancelled || scanned) return
+          scanned = true
+          barcodeHandlerRef.current(result.getText())
+          setCameraOpen(false)
+        })
+        if (cancelled) startedControls.stop()
+        else controls = startedControls
+      } catch (error: unknown) {
+        if (cancelled) return
+        setCameraError(error instanceof Error ? error.message : 'Could not start the camera. Check browser permissions.')
+      }
+    }
+
+    void startCamera()
+    return () => {
+      cancelled = true
+      controls?.stop()
+    }
+  }, [cameraOpen])
 
   const checkout = async () => {
     if (!cart.items.length) { setMessage('Add at least one product'); return }
@@ -84,12 +140,18 @@ export default function POSPage() {
         cashReceived: paid,
       })
       if (printReceipt) {
+        const shop = await db.settings.get('shop')
         printSale(sale, cart.items.map((item) => ({
           id: crypto.randomUUID(), saleId: sale.id, productId: item.productId,
           productName: item.name, bottleSize: item.bottleSize, quantity: item.quantity,
           unitPrice: item.unitPrice, purchasePrice: item.purchasePrice, discount: item.discount,
           tax: 0, total: item.unitPrice * item.quantity - item.discount,
-        })), '80mm')
+        })), '80mm', {
+          name: shop?.shopName || 'WineBar POS',
+          address: shop?.address || '',
+          phone: shop?.phone || '',
+          gst: shop?.gst || '',
+        })
       }
       setPaymentOpen(false)
       setCartOpen(false)
@@ -123,7 +185,13 @@ export default function POSPage() {
       <section className="pos-products">
         <div className="pos-search">
           <div className="search-box"><Search size={18} /><input ref={searchRef} value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search name, brand, barcode or SKU (F2)" /></div>
-          <div className="barcode-box"><Barcode size={18} /><input value={barcode} onChange={(event) => setBarcode(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && scanBarcode()} placeholder="Scan barcode" /></div>
+          <div className="barcode-box"><Barcode size={18} /><input ref={barcodeRef} value={barcode} onChange={(event) => setBarcode(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && scanBarcode()} placeholder="Scan barcode (press Enter)" /></div>
+          <button className="secondary camera-scan-button" onClick={() => {
+            setCameraError(!navigator.mediaDevices?.getUserMedia || !window.isSecureContext
+              ? 'Camera scanning requires camera permission and a secure HTTPS connection.'
+              : '')
+            setCameraOpen(true)
+          }}><Camera size={16}/> Camera</button>
         </div>
         {message && <div className="toast">{message}<button onClick={() => setMessage('')}><X size={14} /></button></div>}
         <div className="product-grid">
@@ -187,6 +255,17 @@ export default function POSPage() {
             )}
             <label className="print-option"><input type="checkbox" checked={printReceipt} onChange={(event) => setPrintReceipt(event.target.checked)} /> Print 80 mm receipt after sale</label>
             <button className="primary wide" onClick={checkout}>Complete sale</button>
+          </div>
+        </div>
+      )}
+      {cameraOpen && (
+        <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && setCameraOpen(false)}>
+          <div className="modal scanner-modal">
+            <div className="modal-header"><div><small>Barcode scanner</small><h2>Scan a product</h2></div><button onClick={() => setCameraOpen(false)} aria-label="Close camera"><X size={20}/></button></div>
+            <video ref={videoRef} autoPlay playsInline muted/>
+            <p>Allow camera access and hold the barcode inside the camera view.</p>
+            {cameraError && <div className="login-error">{cameraError}</div>}
+            <button className="secondary wide" onClick={() => setCameraOpen(false)}>Close scanner</button>
           </div>
         </div>
       )}

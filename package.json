@@ -12,6 +12,7 @@
   "dependencies": {
     "@hookform/resolvers": "^7.0.8",
     "@supabase/supabase-js": "^2.119.2",
+    "@zxing/browser": "^0.2.1",
     "dexie": "^4.4.7",
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.9",
