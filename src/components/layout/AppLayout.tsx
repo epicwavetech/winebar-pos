@@ -8,7 +8,7 @@ import { useEffect, useState } from 'react'
 import { useAuthStore, canAccess } from '../../stores/authStore'
 import { db } from '../../db/database'
 import { synchronizePending } from '../../services/syncService'
-import { RefreshCw } from 'lucide-react'
+import { RefreshCw, LogOut } from 'lucide-react'
 
 const nav = [
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -45,12 +45,24 @@ export default function AppLayout() {
       window.removeEventListener('offline', update)
     }
   }, [])
+  const signOut = () => {
+    localStorage.removeItem('winebar-user-id')
+    useAuthStore.getState().logout()
+    navigate('/login', { replace: true })
+  }
   const syncNow = async () => {
     setSyncMessage('Checking server...')
     const result = await synchronizePending()
     setPending(result.pending)
     setSyncMessage(result.error || `${result.synced} record(s) synchronized`)
   }
+  useEffect(() => {
+    if (!online) return
+    void syncNow()
+    const timer = window.setInterval(() => { void syncNow() }, 60000)
+    return () => window.clearInterval(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [online])
   useEffect(() => {
     document.documentElement.dataset.theme = dark ? 'dark' : 'light'
   }, [dark])
@@ -82,6 +94,7 @@ export default function AppLayout() {
           </button>
           <button className="icon-button sync-button" onClick={syncNow} aria-label="Synchronize" title={syncMessage || 'Synchronize'}><RefreshCw size={17}/></button>
           <div className="cashier"><span>{(user?.name || 'U').slice(0, 2).toUpperCase()}</span><div><strong>{user?.name || 'User'}</strong><small>{user?.role || 'Offline'}</small></div></div>
+          <button className="icon-button" onClick={signOut} aria-label="Log out" title="Log out"><LogOut size={17}/></button>
         </header>
         <div className="page-content"><Outlet /></div>
       </main>

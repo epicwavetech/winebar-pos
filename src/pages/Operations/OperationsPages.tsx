@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Plus } from 'lucide-react'
 import { db } from '../../db/database'
 import { Page, DataTable } from '../../components/ui/Shared'
-import type { Expense, Product, Purchase } from '../../types/models'
+import type { Expense, Product, Purchase, PurchaseItem } from '../../types/models'
 import { printSale } from '../../services/printService'
 import { downloadCsv, exportExcel, exportPdf } from '../../services/exportService'
 
@@ -31,13 +31,16 @@ export function StockInPage() {
     await db.transaction('rw', [db.products, db.purchases, db.inventoryTransactions, db.syncQueue], async () => {
       const purchase: Purchase = { id, reference, createdAt: new Date().toISOString(), total, userId: 'admin-1', items: [], syncStatus: 'pending' }
       await db.purchases.add(purchase)
+      const purchaseItems: PurchaseItem[] = []
       for (const line of items) {
         const product = await db.products.get(line.productId)
         if (!product) continue
+        purchaseItems.push({ id: crypto.randomUUID(), purchaseId: id, productId: product.id, productName: product.name, bottleSize: product.bottleSize, quantity: line.quantity, purchaseRate: Math.round(line.rate * 100) })
         const balance = product.currentStock + line.quantity
         await db.products.update(product.id, { currentStock: balance, updatedAt: new Date().toISOString() })
         await db.inventoryTransactions.add({ id: crypto.randomUUID(), reference, productId: product.id, productName: product.name, type: 'PURCHASE_IN', stockIn: line.quantity, stockOut: 0, balance, userId: 'admin-1', createdAt: purchase.createdAt, syncStatus: 'pending' })
       }
+      await db.purchases.update(id, { items: purchaseItems })
       await db.syncQueue.add({ id: crypto.randomUUID(), entityType: 'purchase', entityId: id, status: 'pending', createdAt: purchase.createdAt, attempts: 0 })
     })
     setItems([])
