@@ -127,7 +127,12 @@ export function ExpensesPage() {
     const title = window.prompt('Expense title')
     const amount = Number(window.prompt('Amount (₹)') || 0)
     if (!title || amount <= 0) return
-    await db.expenses.add({ id: crypto.randomUUID(), title, category: 'Other operating expenses', amount: Math.round(amount * 100), date: new Date().toISOString().slice(0,10), paymentMethod: 'CASH', description: '', userId: 'admin-1', createdAt: new Date().toISOString(), syncStatus: 'pending' })
+    const createdAt = new Date().toISOString()
+    const id = crypto.randomUUID()
+    await db.transaction('rw', db.expenses, db.syncQueue, async () => {
+      await db.expenses.add({ id, title, category: 'Other operating expenses', amount: Math.round(amount * 100), date: createdAt.slice(0,10), paymentMethod: 'CASH', description: '', userId: 'admin-1', createdAt, syncStatus: 'pending' })
+      await db.syncQueue.add({ id: crypto.randomUUID(), entityType: 'expense', entityId: id, status: 'pending', createdAt, attempts: 0 })
+    })
     setItems(await db.expenses.toArray())
   }
   return <Page title="Expenses" subtitle="Operating expenses"><button className="primary" onClick={add}><Plus size={16}/> Add expense</button><DataTable headers={['Title','Date','Category','Payment','Amount']} rows={items.map((item) => [item.title,item.date,item.category,item.paymentMethod,`₹${(item.amount/100).toFixed(2)}`])}/></Page>

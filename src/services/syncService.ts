@@ -153,7 +153,21 @@ async function runSync(): Promise<SyncResult> {
   let synced = 0
   let failed = 0
   const queue = await db.syncQueue.where('status').anyOf('pending', 'error').toArray()
-  for (const entry of queue) {
+  const queuedExpenseIds = new Set(queue.filter((entry) => entry.entityType === 'expense').map((entry) => entry.entityId))
+  const unqueuedExpenses = await db.expenses.where('syncStatus').anyOf('pending', 'error').toArray()
+  const missingExpenseEntries = unqueuedExpenses
+    .filter((expense) => !queuedExpenseIds.has(expense.id))
+    .map((expense) => ({
+      id: crypto.randomUUID(),
+      entityType: 'expense',
+      entityId: expense.id,
+      status: 'pending',
+      createdAt: expense.createdAt,
+      attempts: 0,
+    }))
+  if (missingExpenseEntries.length) await db.syncQueue.bulkAdd(missingExpenseEntries)
+  const recordsToSync = [...queue, ...missingExpenseEntries]
+  for (const entry of recordsToSync) {
     try {
       let payload: unknown = null
       if (entry.entityType === 'sale') {

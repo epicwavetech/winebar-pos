@@ -46,6 +46,8 @@ button { cursor:pointer; }
 .date-input { height:38px; display:flex; align-items:center; gap:4px; border:1px solid var(--border); border-radius:8px; padding:0 8px }.date-input input { border:0; background:transparent; color:var(--text); width:120px }
 .mobile-nav,.mobile-cart-button,.mobile-cart-close { display:none }
 .settings-note { color:var(--muted);font-size:12px;margin:0 0 14px }
+.settings-feedback { color:#166534;font-size:13px;margin:0 0 12px }
+.settings-feedback.error { color:#be123c }
 .row-actions { display:flex;align-items:center;gap:6px }.row-actions button { min-width:34px;min-height:32px;padding:0 8px }.danger-action { color:#dc2626 }
 .empty-chart { height:280px;display:grid;place-items:center;color:var(--muted);font-size:13px }
 .sync-notice { z-index:20;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 16px;background:#ecfdf3;color:#166534;border-bottom:1px solid #bbf7d0;font-size:12px }
