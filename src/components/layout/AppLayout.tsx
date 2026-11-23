@@ -36,11 +36,17 @@ export default function AppLayout() {
   const location = useLocation()
   const user = useAuthStore((state) => state.user)
   const [pending, setPending] = useState(0)
-  const [syncMessage, setSyncMessage] = useState('')
+  const [syncing, setSyncing] = useState(false)
+  const [syncStatus, setSyncStatus] = useState<{ message: string; error: boolean } | null>(null)
   const visibleNav = nav.filter(({ to }) => user ? canAccess(user.role, to) : false)
   const primaryNav = visibleNav.filter(({ to }) => ['/dashboard', '/pos', '/products', '/inventory'].includes(to))
   const moreNav = visibleNav.filter(({ to }) => !['/dashboard', '/pos', '/products', '/inventory'].includes(to))
-  useEffect(() => { db.syncQueue.where('status').equals('pending').count().then(setPending) }, [])
+  useEffect(() => {
+    Promise.all([
+      db.syncQueue.where('status').anyOf('pending', 'error').count(),
+      db.inventoryTransactions.where('syncStatus').equals('pending').count(),
+    ]).then(([queued, ledger]) => setPending(queued + ledger))
+  }, [])
   useEffect(() => {
     const update = () => setOnline(navigator.onLine)
     window.addEventListener('online', update)
@@ -55,11 +61,25 @@ export default function AppLayout() {
     useAuthStore.getState().logout()
     navigate('/login', { replace: true })
   }
-  const syncNow = async () => {
-    setSyncMessage('Checking server...')
-    const result = await synchronizePending()
-    setPending(result.pending)
-    setSyncMessage(result.error || `${result.synced} record(s) synchronized`)
+  const syncNow = async (manual = false) => {
+    setSyncing(true)
+    if (manual) setSyncStatus({ message: 'Syncing catalog and pending records…', error: false })
+    try {
+      const result = await synchronizePending()
+      setPending(result.pending)
+      setSyncStatus(result.error
+        ? { message: `Sync failed: ${result.error}`, error: true }
+        : manual
+          ? { message: `Sync complete. ${result.synced} pending record(s) sent; ${result.pending} still pending.`, error: false }
+          : null)
+    } catch (error) {
+      setSyncStatus({
+        message: `Sync failed: ${error instanceof Error ? error.message : 'Unexpected error'}`,
+        error: true,
+      })
+    } finally {
+      setSyncing(false)
+    }
   }
   useEffect(() => {
     if (!online) return
@@ -114,10 +134,14 @@ export default function AppLayout() {
           <button className="icon-button" onClick={() => setDark((value) => !value)} aria-label="Toggle theme">
             {dark ? <Sun size={18} /> : <Moon size={18} />}
           </button>
-          <button className="icon-button sync-button" onClick={syncNow} aria-label="Synchronize" title={syncMessage || 'Synchronize'}><RefreshCw size={17}/></button>
+          <button className="icon-button sync-button" onClick={() => void syncNow(true)} aria-label={syncing ? 'Synchronizing' : 'Synchronize'} title={syncStatus?.message || 'Synchronize'} disabled={syncing}><RefreshCw size={17} className={syncing ? 'syncing-icon' : undefined}/></button>
           <div className="cashier"><span>{(user?.name || 'U').slice(0, 2).toUpperCase()}</span><div><strong>{user?.name || 'User'}</strong><small>{user?.role || 'Offline'}</small></div></div>
           <button className="icon-button" onClick={signOut} aria-label="Log out" title="Log out"><LogOut size={17}/></button>
         </header>
+        {syncStatus && <div className={`sync-notice${syncStatus.error ? ' error' : ''}`} role={syncStatus.error ? 'alert' : 'status'}>
+          <span>{syncStatus.message}</span>
+          <button onClick={() => setSyncStatus(null)} aria-label="Dismiss sync message">×</button>
+        </div>}
         <div className="page-content"><Outlet /></div>
       </main>
     </div>

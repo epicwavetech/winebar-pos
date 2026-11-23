@@ -55,7 +55,13 @@ async function send<T>(url: string, headers: Record<string, string>, body?: unkn
   return response.json()
 }
 
-const unsyncedCount = () => db.syncQueue.where('status').anyOf('pending', 'error').count()
+const unsyncedCount = async () => {
+  const [queued, ledger] = await Promise.all([
+    db.syncQueue.where('status').anyOf('pending', 'error').count(),
+    db.inventoryTransactions.where('syncStatus').equals('pending').count(),
+  ])
+  return queued + ledger
+}
 const timestamp = (value?: string) => {
   const parsed = value ? Date.parse(value) : 0
   return Number.isNaN(parsed) ? 0 : parsed
@@ -181,6 +187,7 @@ async function runSync(): Promise<SyncResult> {
       const chunk = ledger.slice(i, i + 500)
       await send(`${base}/inventory`, headers, { transactions: chunk })
       await db.inventoryTransactions.where('id').anyOf(chunk.map((row) => row.id)).modify({ syncStatus: 'synced' })
+      synced += chunk.length
     }
   } catch (error) {
     ledgerError = `Stock ledger sync failed: ${error instanceof Error ? error.message : 'unknown error'}`
