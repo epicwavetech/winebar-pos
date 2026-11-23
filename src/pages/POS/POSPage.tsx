@@ -22,6 +22,7 @@ export default function POSPage() {
   const [printReceipt, setPrintReceipt] = useState(true)
   const searchRef = useRef<HTMLInputElement>(null)
   const barcodeRef = useRef<HTMLInputElement>(null)
+  const barcodeScannerRef = useRef<() => void>(() => {})
   const cart = useCartStore()
   const authUser = useAuthStore((state) => state.user)
 
@@ -140,19 +141,13 @@ export default function POSPage() {
       <section className="pos-products">
         <div className="pos-search">
           <div className="search-box"><Search size={18} /><input ref={searchRef} value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search name, brand, barcode or SKU (F2)" /></div>
-          <BarcodeScanner onScan={handleBarcode}>
-            {(openScanner) => (
-              <>
-                <div className="barcode-box" onClick={(event) => {
-                  if (window.matchMedia('(max-width: 760px)').matches) {
-                    event.preventDefault()
-                    openScanner()
-                  }
-                }}><Barcode size={18} /><input ref={barcodeRef} inputMode="none" value={barcode} onChange={(event) => setBarcode(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && scanBarcode()} placeholder="Scan barcode (press Enter)" /></div>
-                <button className="secondary camera-scan-button" onClick={openScanner}><Barcode size={16}/> Camera</button>
-              </>
-            )}
-          </BarcodeScanner>
+          <div className="barcode-box" onClick={(event) => {
+            if (window.matchMedia('(max-width: 760px)').matches) {
+              event.preventDefault()
+              barcodeScannerRef.current()
+            }
+          }}><Barcode size={18} /><input ref={barcodeRef} inputMode="none" value={barcode} onChange={(event) => setBarcode(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && scanBarcode()} placeholder="Scan barcode (press Enter)" /></div>
+          <BarcodeScanner onScan={handleBarcode} onOpenScannerReady={(openScanner) => { barcodeScannerRef.current = openScanner }} />
         </div>
         {message && <div className="toast">{message}<button onClick={() => setMessage('')}><X size={14} /></button></div>}
         <div className="product-grid">

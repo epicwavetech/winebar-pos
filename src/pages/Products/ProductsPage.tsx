@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { Plus, Search, Download, Upload, Pencil, Trash2, RotateCcw, Camera } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { Plus, Search, Download, Upload, Pencil, Trash2, RotateCcw } from 'lucide-react'
 import { db } from '../../db/database'
 import type { Product, Category } from '../../types/models'
 import * as XLSX from 'xlsx'
@@ -9,6 +9,7 @@ import { useAuthStore } from '../../stores/authStore'
 import BarcodeScanner from '../../components/BarcodeScanner'
 
 export default function ProductsPage() {
+  const barcodeScannerRef = useRef<() => void>(() => {})
   const [products, setProducts] = useState<Product[]>([])
   const [categories, setCategories] = useState<Category[]>([])
   const [search, setSearch] = useState('')
@@ -167,21 +168,21 @@ export default function ProductsPage() {
       {open && <div className="modal-backdrop"><form className="modal form-modal" onSubmit={save}><div className="modal-header"><h2>{editingProduct ? 'Edit product' : 'Add product'}</h2><button type="button" onClick={() => { setOpen(false); setEditingProduct(null) }}>×</button></div>
         <div className="form-grid">
           {(['name','brand'] as const).map((field) => <label key={field}>{field.replace(/([A-Z])/g,' $1').replace(/^./, (s) => s.toUpperCase())}<input required={field === 'name'} value={form[field]} onChange={(event) => setForm({ ...form, [field]: event.target.value })}/></label>)}
-          <BarcodeScanner onScan={(barcode) => setForm((current) => ({ ...current, barcode }))}>
-            {(openScanner) => (
-              <label>Barcode
-                <div className="barcode-input-row">
-                  <input required inputMode="none" value={form.barcode} onChange={(event) => setForm({ ...form, barcode: event.target.value })} onClick={(event) => {
-                    if (window.matchMedia('(max-width: 760px)').matches) {
-                      event.preventDefault()
-                      openScanner()
-                    }
-                  }}/>
-                  <button type="button" className="secondary camera-scan-button" onClick={openScanner}><Camera size={16}/> Scan</button>
-                </div>
-              </label>
-            )}
-          </BarcodeScanner>
+          <label>Barcode
+            <div className="barcode-input-row">
+              <input required inputMode="none" value={form.barcode} onChange={(event) => setForm({ ...form, barcode: event.target.value })} onClick={(event) => {
+                if (window.matchMedia('(max-width: 760px)').matches) {
+                  event.preventDefault()
+                  barcodeScannerRef.current()
+                }
+              }}/>
+              <BarcodeScanner
+                onScan={(barcode) => setForm((current) => ({ ...current, barcode }))}
+                onOpenScannerReady={(openScanner) => { barcodeScannerRef.current = openScanner }}
+                buttonLabel="Scan"
+              />
+            </div>
+          </label>
           {(['sku','bottleSize','purchasePrice','sellingPrice','mrp'] as const).map((field) => <label key={field}>{field.replace(/([A-Z])/g,' $1').replace(/^./, (s) => s.toUpperCase())}<input type={['purchasePrice','sellingPrice','mrp'].includes(field) ? 'number' : 'text'} step={['purchasePrice','sellingPrice','mrp'].includes(field) ? '0.01' : undefined} value={form[field]} onChange={(event) => setForm({ ...form, [field]: event.target.value })}/></label>)}
           {!editingProduct && <label>Opening Stock<input type="number" value={form.openingStock} onChange={(event) => setForm({ ...form, openingStock: event.target.value })}/></label>}
           <label>Category<select required value={form.categoryId} onChange={(event) => setForm({ ...form, categoryId: event.target.value })}><option value="">Select category</option>{categories.map((category) => <option value={category.id} key={category.id}>{category.name}</option>)}</select></label>
