@@ -89,6 +89,13 @@ export default function POSPage() {
     barcodeRef.current?.focus()
   }
 
+  const openCamera = () => {
+    setCameraError(!navigator.mediaDevices?.getUserMedia || !window.isSecureContext
+      ? 'Camera scanning requires camera permission and a secure HTTPS connection.'
+      : '')
+    setCameraOpen(true)
+  }
+
   useEffect(() => {
     if (!cameraOpen || !videoRef.current) return
     if (!navigator.mediaDevices?.getUserMedia || !window.isSecureContext) {
@@ -185,13 +192,13 @@ export default function POSPage() {
       <section className="pos-products">
         <div className="pos-search">
           <div className="search-box"><Search size={18} /><input ref={searchRef} value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search name, brand, barcode or SKU (F2)" /></div>
-          <div className="barcode-box"><Barcode size={18} /><input ref={barcodeRef} value={barcode} onChange={(event) => setBarcode(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && scanBarcode()} placeholder="Scan barcode (press Enter)" /></div>
-          <button className="secondary camera-scan-button" onClick={() => {
-            setCameraError(!navigator.mediaDevices?.getUserMedia || !window.isSecureContext
-              ? 'Camera scanning requires camera permission and a secure HTTPS connection.'
-              : '')
-            setCameraOpen(true)
-          }}><Camera size={16}/> Camera</button>
+          <div className="barcode-box" onClick={(event) => {
+            if (window.matchMedia('(max-width: 760px)').matches) {
+              event.preventDefault()
+              openCamera()
+            }
+          }}><Barcode size={18} /><input ref={barcodeRef} inputMode="none" value={barcode} onChange={(event) => setBarcode(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && scanBarcode()} placeholder="Scan barcode (press Enter)" /></div>
+          <button className="secondary camera-scan-button" onClick={openCamera}><Camera size={16}/> Camera</button>
         </div>
         {message && <div className="toast">{message}<button onClick={() => setMessage('')}><X size={14} /></button></div>}
         <div className="product-grid">
