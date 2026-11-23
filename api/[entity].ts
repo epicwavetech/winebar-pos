@@ -72,11 +72,13 @@ async function handle(request: Request): Promise<Response> {
       return reply({ ok: true })
     }
     if (request.method === 'GET' && entity === 'catalog') {
-      const [categories, products] = await Promise.all([
+      const [categories, products, reset] = await Promise.all([
         readAll(client, 'categories'),
         readAll(client, 'products'),
+        client.from('settings').select('value').eq('key', 'product_catalog_reset').maybeSingle(),
       ])
-      return reply({ categories, products })
+      if (reset.error) throw new Error(`Catalog reset marker: ${reset.error.message}`)
+      return reply({ categories, products, productResetAt: reset.data?.value?.resetAt })
     }
     if (request.method !== 'POST') return reply({ error: 'Method not allowed' }, 405)
     const body = (await request.json()) as Row

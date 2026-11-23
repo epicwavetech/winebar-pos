@@ -36,3 +36,16 @@ See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rule
 The app keeps working data in each device's IndexedDB so it can be used offline. When online, products and categories are synchronized with the shared Supabase database through the Vercel `/api` endpoints. Deploy the app with `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and `SYNC_API_KEY` set in Vercel, and run [`supabase/schema.sql`](./supabase/schema.sql) in the Supabase SQL editor.
 
 After deploying, open **Settings** on every browser/device, enter the same `SYNC_API_KEY` value, and save. These sync settings are stored locally per browser; setting the key on a PC does not configure a phone. A product saved while online syncs immediately, and the shared catalog is downloaded the next time another device synchronizes. Offline changes sync when that device reconnects.
+
+To clear all products without older browser caches restoring them, deploy the catalog-reset sync code, close WineBar on all devices, then run this in the Supabase SQL editor:
+
+```sql
+begin;
+delete from public.products;
+insert into public.settings (key, value)
+values ('product_catalog_reset', jsonb_build_object('resetAt', now()))
+on conflict (key) do update set value = excluded.value, updated_at = now();
+commit;
+```
+
+On the next sync, devices remove cached products older than the reset marker. Products created after the reset continue to sync normally.

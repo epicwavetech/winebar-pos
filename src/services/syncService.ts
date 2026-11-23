@@ -13,6 +13,7 @@ const DEFAULT_ENDPOINT = '/api'
 let running: Promise<SyncResult> | undefined
 
 interface CatalogResponse {
+  productResetAt?: string
   categories: Array<{
     id: string
     name: string
@@ -99,7 +100,7 @@ function fromCatalog(catalog: CatalogResponse) {
       updatedAt: product.updated_at ?? createdAt,
     }
   })
-  return { categories, products }
+  return { categories, products, productResetAt: catalog.productResetAt }
 }
 
 export function synchronizePending(): Promise<SyncResult> {
@@ -128,16 +129,23 @@ async function runSync(): Promise<SyncResult> {
     const initialCatalog = await send<CatalogResponse>(`${base}/catalog`, headers)
     const initial = fromCatalog(initialCatalog)
     const remoteById = new Map(initial.products.map((product) => [product.id, product]))
+    const resetTime = timestamp(initial.productResetAt)
     const changedProducts = products.filter((product) => {
       const remote = remoteById.get(product.id)
+      if (resetTime && timestamp(product.updatedAt) <= resetTime && !remote) return false
       return !remote || timestamp(product.updatedAt) > timestamp(remote.updatedAt)
     })
     await send(`${base}/catalog`, headers, { categories, products: changedProducts })
 
     const latestCatalog = fromCatalog(await send<CatalogResponse>(`${base}/catalog`, headers))
     const localById = new Map(products.map((product) => [product.id, product]))
+    const latestRemoteIds = new Set(latestCatalog.products.map((product) => product.id))
+    const productsToRemove = resetTime
+      ? products.filter((product) => timestamp(product.updatedAt) <= resetTime && !latestRemoteIds.has(product.id)).map((product) => product.id)
+      : []
     await db.transaction('rw', db.categories, db.products, async () => {
       await db.categories.bulkPut(latestCatalog.categories)
+      if (productsToRemove.length) await db.products.bulkDelete(productsToRemove)
       const productsToSave = latestCatalog.products.filter((remote) => {
         const local = localById.get(remote.id)
         return !local || timestamp(remote.updatedAt) >= timestamp(local.updatedAt)
