@@ -14,6 +14,7 @@ export default function POSPage() {
   const [search, setSearch] = useState('')
   const [barcode, setBarcode] = useState('')
   const [message, setMessage] = useState('')
+  const [cartOpen, setCartOpen] = useState(false)
   const [paymentOpen, setPaymentOpen] = useState(false)
   const [method, setMethod] = useState<'CASH' | 'UPI' | 'CARD' | 'OTHER'>('CASH')
   const [cashReceived, setCashReceived] = useState('')
@@ -23,8 +24,13 @@ export default function POSPage() {
   const authUser = useAuthStore((state) => state.user)
 
   useEffect(() => {
-    db.categories.where('active').equals(1).sortBy('sortOrder').then(setCategories)
-    db.products.where('active').equals(1).toArray().then(setProducts)
+    const loadCatalog = () => {
+      db.categories.where('active').equals(1).sortBy('sortOrder').then(setCategories)
+      db.products.where('active').equals(1).toArray().then(setProducts)
+    }
+    loadCatalog()
+    window.addEventListener('winebar:catalog-updated', loadCatalog)
+    return () => window.removeEventListener('winebar:catalog-updated', loadCatalog)
   }, [])
 
   useEffect(() => {
@@ -86,6 +92,7 @@ export default function POSPage() {
         })), '80mm')
       }
       setPaymentOpen(false)
+      setCartOpen(false)
       setCashReceived('')
       cart.clear()
       setMessage('Sale completed successfully')
@@ -130,10 +137,14 @@ export default function POSPage() {
             </button>
           ))}
         </div>
+        <button className="mobile-cart-button" onClick={() => setCartOpen(true)}>
+          <span>View bill · {cart.items.length} items</span>
+          <strong>₹{(total / 100).toFixed(2)}</strong>
+        </button>
       </section>
 
-      <aside className="cart-panel">
-        <div className="cart-header"><div><strong>Current Bill</strong><small>{cart.items.length} items</small></div><button onClick={() => cart.clear()} disabled={!cart.items.length}>Clear</button></div>
+      <aside className={`cart-panel${cartOpen ? ' cart-open' : ''}`}>
+        <div className="cart-header"><div><strong>Current Bill</strong><small>{cart.items.length} items</small></div><div><button onClick={() => cart.clear()} disabled={!cart.items.length}>Clear</button><button className="mobile-cart-close" onClick={() => setCartOpen(false)} aria-label="Close bill"><X size={18}/></button></div></div>
         <div className="cart-items">
           {cart.items.length === 0 && <div className="cart-empty"><ShoppingIcon /><strong>No items yet</strong><small>Select a product to begin</small></div>}
           {cart.items.map((item) => (

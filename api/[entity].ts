@@ -32,6 +32,16 @@ async function upsertChunks(table: string, rows: Row[], onConflict = 'id') {
   }
 }
 
+async function readAll(client: ReturnType<typeof supabase>, table: string) {
+  const rows: Row[] = []
+  for (let offset = 0; ; offset += 1000) {
+    const { data, error } = await client.from(table).select('*').range(offset, offset + 999)
+    if (error) throw new Error(`${table}: ${error.message}`)
+    rows.push(...(data ?? []))
+    if (!data || data.length < 1000) return rows
+  }
+}
+
 const toCategory = (c: Row) => ({ id: c.id, name: c.name, icon: c.icon ?? '', color: c.color ?? '#64748b', sort_order: c.sortOrder ?? 0, active: c.active ?? true })
 
 const toProduct = (p: Row) => ({
@@ -40,7 +50,7 @@ const toProduct = (p: Row) => ({
   purchase_price: p.purchasePrice ?? 0, selling_price: p.sellingPrice ?? 0, mrp: p.mrp ?? 0,
   tax_rate: p.taxRate ?? 0, opening_stock: p.openingStock ?? 0, current_stock: p.currentStock ?? 0,
   minimum_stock: p.minimumStock ?? 0, image: p.image ?? null, active: p.active ?? true,
-  created_at: p.createdAt, updated_at: p.updatedAt,
+  created_at: p.createdAt, updated_at: p.updatedAt ?? p.createdAt,
 })
 
 const toLedger = (t: Row) => ({
@@ -60,6 +70,13 @@ async function handle(request: Request): Promise<Response> {
       const { error } = await client.from('settings').select('key').limit(1)
       if (error) throw new Error(`Database check failed: ${error.message}`)
       return reply({ ok: true })
+    }
+    if (request.method === 'GET' && entity === 'catalog') {
+      const [categories, products] = await Promise.all([
+        readAll(client, 'categories'),
+        readAll(client, 'products'),
+      ])
+      return reply({ categories, products })
     }
     if (request.method !== 'POST') return reply({ error: 'Method not allowed' }, 405)
     const body = (await request.json()) as Row

@@ -16,7 +16,7 @@ export const useAuthStore = create<AuthState>((set) => ({
 export const rolePages: Record<UserRole, string[]> = {
   ADMIN: ['*'],
   MANAGER: ['/dashboard','/pos','/products','/categories','/stock-in','/stock-out','/adjustment','/inventory','/purchases','/sales','/expenses','/settlement','/reports'],
-  CASHIER: ['/pos','/sales','/dashboard'],
+  CASHIER: ['/pos','/sales','/dashboard','/products','/categories','/stock-in','/stock-out','/adjustment','/inventory','/purchases','/reports'],
   INVENTORY_STAFF: ['/products','/stock-in','/stock-out','/adjustment','/inventory','/purchases','/reports'],
 }
 

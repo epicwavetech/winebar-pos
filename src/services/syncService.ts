@@ -1,4 +1,5 @@
 import { db } from '../db/database'
+import type { Category, Product } from '../types/models'
 
 export interface SyncResult {
   synced: number
@@ -9,9 +10,40 @@ export interface SyncResult {
 
 // Default to the same-origin Vercel API (/api) when no endpoint is saved in Settings.
 const DEFAULT_ENDPOINT = '/api'
-let running = false
+let running: Promise<SyncResult> | undefined
 
-async function send(url: string, headers: Record<string, string>, body?: unknown) {
+interface CatalogResponse {
+  categories: Array<{
+    id: string
+    name: string
+    icon?: string | null
+    color?: string | null
+    sort_order?: number | null
+    active?: boolean | null
+  }>
+  products: Array<{
+    id: string
+    name: string
+    brand?: string | null
+    category_id?: string | null
+    bottle_size?: string | null
+    barcode?: string | null
+    sku?: string | null
+    purchase_price?: number | string | null
+    selling_price?: number | string | null
+    mrp?: number | string | null
+    tax_rate?: number | string | null
+    opening_stock?: number | null
+    current_stock?: number | null
+    minimum_stock?: number | null
+    image?: string | null
+    active?: boolean | null
+    created_at?: string | null
+    updated_at?: string | null
+  }>
+}
+
+async function send<T>(url: string, headers: Record<string, string>, body?: unknown): Promise<T> {
   const response = await fetch(url, body === undefined
     ? { method: 'GET', headers }
     : { method: 'POST', headers, body: JSON.stringify(body) })
@@ -20,18 +52,54 @@ async function send(url: string, headers: Record<string, string>, body?: unknown
     try { detail = (await response.json())?.error || '' } catch { /* body was not JSON */ }
     throw new Error(detail || `Request failed (${response.status})`)
   }
+  return response.json()
 }
 
 const unsyncedCount = () => db.syncQueue.where('status').anyOf('pending', 'error').count()
+const timestamp = (value?: string) => {
+  const parsed = value ? Date.parse(value) : 0
+  return Number.isNaN(parsed) ? 0 : parsed
+}
 
-export async function synchronizePending(): Promise<SyncResult> {
-  if (running) return { synced: 0, pending: await unsyncedCount(), error: 'Sync already in progress' }
-  running = true
-  try {
-    return await runSync()
-  } finally {
-    running = false
-  }
+function fromCatalog(catalog: CatalogResponse) {
+  const categories: Category[] = catalog.categories.map((category) => ({
+    id: category.id,
+    name: category.name,
+    icon: category.icon ?? '',
+    color: category.color ?? '#64748b',
+    sortOrder: category.sort_order ?? 0,
+    active: category.active ?? true,
+  }))
+  const products: Product[] = catalog.products.map((product) => {
+    const createdAt = product.created_at ?? new Date().toISOString()
+    return {
+      id: product.id,
+      name: product.name,
+      brand: product.brand ?? '',
+      categoryId: product.category_id ?? '',
+      bottleSize: product.bottle_size ?? '',
+      barcode: product.barcode ?? '',
+      sku: product.sku ?? '',
+      purchasePrice: Number(product.purchase_price ?? 0),
+      sellingPrice: Number(product.selling_price ?? 0),
+      mrp: Number(product.mrp ?? 0),
+      taxRate: Number(product.tax_rate ?? 0),
+      openingStock: product.opening_stock ?? 0,
+      currentStock: product.current_stock ?? 0,
+      minimumStock: product.minimum_stock ?? 0,
+      image: product.image ?? undefined,
+      active: product.active ?? true,
+      createdAt,
+      updatedAt: product.updated_at ?? createdAt,
+    }
+  })
+  return { categories, products }
+}
+
+export function synchronizePending(): Promise<SyncResult> {
+  if (running) return running
+  running = runSync().finally(() => { running = undefined })
+  return running
 }
 
 async function runSync(): Promise<SyncResult> {
@@ -48,10 +116,29 @@ async function runSync(): Promise<SyncResult> {
     return { synced: 0, pending: await unsyncedCount(), error: error instanceof Error ? error.message : 'Server is unavailable' }
   }
 
-  // 2. Push catalog first so products/categories exist before sales and stock rows reference them
+  // 2. Pull the shared catalog, then push only newer local products to avoid stale devices overwriting it.
   try {
     const [categories, products] = await Promise.all([db.categories.toArray(), db.products.toArray()])
-    await send(`${base}/catalog`, headers, { categories, products })
+    const initialCatalog = await send<CatalogResponse>(`${base}/catalog`, headers)
+    const initial = fromCatalog(initialCatalog)
+    const remoteById = new Map(initial.products.map((product) => [product.id, product]))
+    const changedProducts = products.filter((product) => {
+      const remote = remoteById.get(product.id)
+      return !remote || timestamp(product.updatedAt) > timestamp(remote.updatedAt)
+    })
+    await send(`${base}/catalog`, headers, { categories, products: changedProducts })
+
+    const latestCatalog = fromCatalog(await send<CatalogResponse>(`${base}/catalog`, headers))
+    const localById = new Map(products.map((product) => [product.id, product]))
+    await db.transaction('rw', db.categories, db.products, async () => {
+      await db.categories.bulkPut(latestCatalog.categories)
+      const productsToSave = latestCatalog.products.filter((remote) => {
+        const local = localById.get(remote.id)
+        return !local || timestamp(remote.updatedAt) >= timestamp(local.updatedAt)
+      })
+      await db.products.bulkPut(productsToSave)
+    })
+    window.dispatchEvent(new Event('winebar:catalog-updated'))
   } catch (error) {
     return { synced: 0, pending: await unsyncedCount(), error: `Catalog sync failed: ${error instanceof Error ? error.message : 'unknown error'}` }
   }

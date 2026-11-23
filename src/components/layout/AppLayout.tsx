@@ -1,8 +1,8 @@
-import { NavLink, Outlet, useNavigate } from 'react-router-dom'
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, ShoppingCart, Package, Tags, ArrowDownToLine, ArrowUpFromLine,
   SlidersHorizontal, Boxes, ReceiptText, WalletCards, CircleDollarSign,
-  Settings, Users, BarChart3, Moon, Sun, Wifi, WifiOff,
+  Settings, Users, BarChart3, Moon, Sun, Wifi, WifiOff, MoreHorizontal,
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useAuthStore, canAccess } from '../../stores/authStore'
@@ -31,10 +31,15 @@ const nav = [
 export default function AppLayout() {
   const [online, setOnline] = useState(navigator.onLine)
   const [dark, setDark] = useState(false)
+  const [moreOpen, setMoreOpen] = useState(false)
   const navigate = useNavigate()
+  const location = useLocation()
   const user = useAuthStore((state) => state.user)
   const [pending, setPending] = useState(0)
   const [syncMessage, setSyncMessage] = useState('')
+  const visibleNav = nav.filter(({ to }) => user ? canAccess(user.role, to) : false)
+  const primaryNav = visibleNav.filter(({ to }) => ['/dashboard', '/pos', '/products', '/inventory'].includes(to))
+  const moreNav = visibleNav.filter(({ to }) => !['/dashboard', '/pos', '/products', '/inventory'].includes(to))
   useEffect(() => { db.syncQueue.where('status').equals('pending').count().then(setPending) }, [])
   useEffect(() => {
     const update = () => setOnline(navigator.onLine)
@@ -75,13 +80,30 @@ export default function AppLayout() {
           <span><strong>WineBar</strong><small>Retail POS</small></span>
         </button>
         <nav>
-          {nav.filter(({ to }) => user ? canAccess(user.role, to) : false).map(({ to, label, icon: Icon }) => (
+          {visibleNav.map(({ to, label, icon: Icon }) => (
             <NavLink key={to} to={to} className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
               <Icon size={18} /><span>{label}</span>
             </NavLink>
           ))}
         </nav>
       </aside>
+      <nav className="mobile-nav" aria-label="Main navigation">
+        {primaryNav.map(({ to, label, icon: Icon }) => (
+          <NavLink key={to} to={to} className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'} onClick={() => setMoreOpen(false)}>
+            <Icon size={18} /><span>{label}</span>
+          </NavLink>
+        ))}
+        <button className={`nav-link mobile-more-button${moreNav.some(({ to }) => to === location.pathname) ? ' active' : ''}`} onClick={() => setMoreOpen((open) => !open)} aria-expanded={moreOpen}>
+          <MoreHorizontal size={18}/><span>More</span>
+        </button>
+        {moreOpen && <div className="mobile-more-menu" aria-label="More navigation">
+          {moreNav.map(({ to, label, icon: Icon }) => (
+            <NavLink key={to} to={to} className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'} onClick={() => setMoreOpen(false)}>
+              <Icon size={18}/><span>{label}</span>
+            </NavLink>
+          ))}
+        </div>}
+      </nav>
       <main className="main-area">
         <header className="topbar">
           <div className={`connectivity ${online ? 'online' : 'offline'}`}>
