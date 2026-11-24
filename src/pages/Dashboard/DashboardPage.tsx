@@ -19,7 +19,7 @@ export default function DashboardPage() {
         sales: todaySales.reduce((sum, sale) => sum + sale.total, 0),
         bills: todaySales.length,
         stock: products.reduce((sum, product) => sum + product.currentStock, 0),
-        value: products.reduce((sum, product) => sum + product.currentStock * product.purchasePrice, 0),
+        value: products.reduce((sum, product) => sum + (product.purchasePriceStatus === 'verified' ? product.currentStock * product.purchasePrice : 0), 0),
         low: products.filter((product) => product.active && product.currentStock <= product.minimumStock).length,
       })
       const weekStart = new Date(today)
@@ -44,7 +44,7 @@ export default function DashboardPage() {
     { label: "Today's sales", value: `₹${(stats.sales / 100).toLocaleString('en-IN')}`, icon: IndianRupee, tone: 'green' },
     { label: 'Bills today', value: stats.bills, icon: ReceiptText, tone: 'purple' },
     { label: 'Bottles in stock', value: stats.stock, icon: Boxes, tone: 'blue' },
-    { label: 'Inventory value', value: `₹${(stats.value / 100).toLocaleString('en-IN')}`, icon: Package, tone: 'amber' },
+    { label: 'Verified inventory value', value: `₹${(stats.value / 100).toLocaleString('en-IN')}`, icon: Package, tone: 'amber' },
   ]
   const weeklySales = chart.reduce((sum, day) => sum + day.sales, 0)
   return (

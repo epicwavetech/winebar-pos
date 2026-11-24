@@ -51,6 +51,8 @@ create table if not exists public.products (
   barcode         text not null default '',
   sku             text not null default '',
   purchase_price  bigint  not null default 0 check (purchase_price >= 0),
+  purchase_price_status text not null default 'pending' check (purchase_price_status in ('verified','pending')),
+  purchase_price_source text not null default 'pending' check (purchase_price_source in ('actual-invoice-payable','configured-formula','pending')),
   selling_price   bigint  not null default 0 check (selling_price  >= 0),
   mrp             bigint  not null default 0 check (mrp            >= 0),
   tax_rate        numeric(5,2) not null default 0,
@@ -69,17 +71,35 @@ create index if not exists products_brand_idx    on public.products(brand);
 create index if not exists products_barcode_idx on public.products(barcode);
 create index if not exists products_sku_idx     on public.products(sku);
 
+alter table public.products add column if not exists purchase_price_status text not null default 'pending';
+alter table public.products add column if not exists purchase_price_source text not null default 'pending';
+
 drop trigger if exists products_updated_at on public.products;
 create trigger products_updated_at before update on public.products
   for each row execute function public.set_updated_at();
 
--- ---------- sales ----------
+-- ---------- customer accounts ----------
+create table if not exists public.customers (
+  id              text primary key,
+  name            text not null,
+  phone           text not null default '',
+  credit_balance  bigint not null default 0 check (credit_balance >= 0),
+  created_at      timestamptz not null default now(),
+  updated_at      timestamptz not null default now()
+);
+create index if not exists customers_name_idx on public.customers(name);
+create index if not exists customers_phone_idx on public.customers(phone);
+drop trigger if exists customers_updated_at on public.customers;
+create trigger customers_updated_at before update on public.customers
+  for each row execute function public.set_updated_at();
+
 create table if not exists public.sales (
   id               text primary key,
   idempotency_key  text not null unique,          -- makes sync retries safe
   invoice_number   text not null unique,
   cashier_id       text,
   cashier_name     text not null default '',
+  customer_id      text references public.customers(id) on update cascade on delete set null,
   created_at       timestamptz not null default now(),
   subtotal         bigint not null default 0,
   discount         bigint not null default 0,
@@ -102,10 +122,12 @@ create table if not exists public.sale_items (
   quantity        integer not null check (quantity > 0),
   unit_price      bigint  not null default 0,
   purchase_price  bigint  not null default 0,
+  purchase_price_status text not null default 'pending',
   discount        bigint  not null default 0,
   tax             bigint  not null default 0,
   total           bigint  not null default 0
 );
+alter table public.sale_items add column if not exists purchase_price_status text not null default 'pending';
 create index if not exists sale_items_sale_idx    on public.sale_items(sale_id);
 create index if not exists sale_items_product_idx on public.sale_items(product_id);
 
@@ -113,7 +135,7 @@ create index if not exists sale_items_product_idx on public.sale_items(product_i
 create table if not exists public.sale_payments (
   id        text primary key,
   sale_id   text not null references public.sales(id) on delete cascade,
-  method    text not null check (method in ('CASH','UPI','CARD','OTHER')),
+  method    text not null check (method in ('CASH','UPI','CARD','OTHER','BTC')),
   amount    bigint not null check (amount >= 0)
 );
 create index if not exists sale_payments_sale_idx on public.sale_payments(sale_id);
@@ -125,8 +147,10 @@ create table if not exists public.purchases (
   created_at     timestamptz not null default now(),
   supplier_note  text,
   total          bigint not null default 0,
+  cost_status    text not null default 'pending',
   user_id        text
 );
+alter table public.purchases add column if not exists cost_status text not null default 'pending';
 create index if not exists purchases_created_at_idx on public.purchases(created_at);
 
 create table if not exists public.purchase_items (
@@ -137,8 +161,18 @@ create table if not exists public.purchase_items (
   bottle_size    text not null default '',
   quantity       integer not null check (quantity > 0),
   purchase_rate  bigint  not null default 0,
+  acquisition_cost bigint not null default 0 check (acquisition_cost >= 0),
+  cost_status    text not null default 'pending',
+  cost_source    text not null default 'pending',
+  invoice_values jsonb not null default '{}'::jsonb,
+  formula_snapshot jsonb,
   batch_number   text
 );
+alter table public.purchase_items add column if not exists cost_status text not null default 'pending';
+alter table public.purchase_items add column if not exists cost_source text not null default 'pending';
+alter table public.purchase_items add column if not exists acquisition_cost bigint not null default 0;
+alter table public.purchase_items add column if not exists invoice_values jsonb not null default '{}'::jsonb;
+alter table public.purchase_items add column if not exists formula_snapshot jsonb;
 create index if not exists purchase_items_purchase_idx on public.purchase_items(purchase_id);
 
 -- ---------- inventory_transactions (stock ledger) ----------
@@ -183,6 +217,7 @@ create table if not exists public.settlements (
   upi_sales      bigint not null default 0,
   card_sales     bigint not null default 0,
   other_sales    bigint not null default 0,
+  credit_sales   bigint not null default 0,
   cash_expenses  bigint not null default 0,
   expected_cash  bigint not null default 0,
   actual_cash    bigint not null default 0,
@@ -229,6 +264,11 @@ alter table public.purchases              drop constraint if exists purchases_us
 alter table public.inventory_transactions drop constraint if exists inventory_transactions_user_id_fkey;
 alter table public.expenses               drop constraint if exists expenses_user_id_fkey;
 alter table public.settlements            drop constraint if exists settlements_closed_by_fkey;
+alter table public.sales                  add column if not exists customer_id text references public.customers(id) on update cascade on delete set null;
+alter table public.settlements            add column if not exists credit_sales bigint not null default 0;
+alter table public.sale_payments          drop constraint if exists sale_payments_method_check;
+alter table public.sale_payments          add constraint sale_payments_method_check check (method in ('CASH','UPI','CARD','OTHER','BTC'));
+create index if not exists sales_customer_idx on public.sales(customer_id);
 alter table public.categories             drop constraint if exists categories_name_key;
 drop index if exists public.products_barcode_uq;
 drop index if exists public.products_sku_uq;
@@ -249,10 +289,33 @@ set search_path = public
 as $$
 declare
   v_id text := payload->>'id';
+  v_customer_id text := nullif(payload->>'customerId','');
+  v_credit_amount bigint;
   v_inserted int;
 begin
+  if exists (
+    select 1
+    from jsonb_array_elements(coalesce(payload->'payments','[]'::jsonb)) p
+    where p->>'method' = 'BTC'
+  ) and v_customer_id is null then
+    raise exception 'Bill-to-Credit sale requires a customer';
+  end if;
+
+  if v_customer_id is not null then
+    if payload->'customer'->>'name' is not null then
+      insert into public.customers (id, name, phone, created_at)
+      values (
+        v_customer_id,
+        payload->'customer'->>'name',
+        coalesce(payload->'customer'->>'phone',''),
+        coalesce((payload->'customer'->>'createdAt')::timestamptz, now())
+      )
+      on conflict (id) do nothing;
+    end if;
+  end if;
+
   insert into public.sales (
-    id, idempotency_key, invoice_number, cashier_id, cashier_name, created_at,
+    id, idempotency_key, invoice_number, cashier_id, cashier_name, customer_id, created_at,
     subtotal, discount, tax, total, cash_received, change_returned
   ) values (
     v_id,
@@ -260,6 +323,7 @@ begin
     payload->>'invoiceNumber',
     nullif(payload->>'cashierId',''),
     coalesce(payload->>'cashierName',''),
+    v_customer_id,
     (payload->>'createdAt')::timestamptz,
     coalesce((payload->>'subtotal')::bigint,0),
     coalesce((payload->>'discount')::bigint,0),
@@ -282,7 +346,7 @@ begin
 
   insert into public.sale_items (
     id, sale_id, product_id, product_name, bottle_size, quantity,
-    unit_price, purchase_price, discount, tax, total
+    unit_price, purchase_price, purchase_price_status, discount, tax, total
   )
   select i->>'id', v_id,
          (select pr.id from public.products pr where pr.id = i->>'productId'),
@@ -290,11 +354,24 @@ begin
          (i->>'quantity')::int,
          coalesce((i->>'unitPrice')::bigint,0),
          coalesce((i->>'purchasePrice')::bigint,0),
+         case when i->>'purchasePriceStatus' = 'verified' then 'verified' else 'pending' end,
          coalesce((i->>'discount')::bigint,0),
          coalesce((i->>'tax')::bigint,0),
          coalesce((i->>'total')::bigint,0)
   from jsonb_array_elements(coalesce(payload->'items','[]'::jsonb)) i
   on conflict (id) do nothing;
+
+  select coalesce(sum((p->>'amount')::bigint),0) into v_credit_amount
+  from jsonb_array_elements(coalesce(payload->'payments','[]'::jsonb)) p
+  where p->>'method' = 'BTC';
+  if v_credit_amount > 0 then
+    update public.customers
+    set credit_balance = credit_balance + v_credit_amount, updated_at = now()
+    where id = v_customer_id;
+    if not found then
+      raise exception 'Customer account not found for Bill-to-Credit sale';
+    end if;
+  end if;
 
   return 'inserted';
 end $$;
@@ -311,6 +388,7 @@ grant execute on function public.sync_sale(jsonb) to service_role;
 -- =====================================================================
 alter table public.users                  enable row level security;
 alter table public.categories             enable row level security;
+alter table public.customers              enable row level security;
 alter table public.products               enable row level security;
 alter table public.sales                  enable row level security;
 alter table public.sale_items             enable row level security;

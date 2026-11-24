@@ -1,5 +1,26 @@
 import { db } from '../db/database'
-import type { CartItem, Sale } from '../types/models'
+import type { CartItem, Sale, SalePaymentMethod } from '../types/models'
+
+function allocateDiscount(totalDiscount: number, lineTotals: number[]) {
+  const total = lineTotals.reduce((sum, lineTotal) => sum + lineTotal, 0)
+  if (!total || !totalDiscount) return lineTotals.map(() => 0)
+
+  const shares = lineTotals.map((lineTotal) => {
+    const exact = totalDiscount * lineTotal / total
+    return { amount: Math.floor(exact), remainder: exact % 1 }
+  })
+  let remaining = totalDiscount - shares.reduce((sum, share) => sum + share.amount, 0)
+  const order = shares.map((share, index) => ({ index, remainder: share.remainder }))
+    .sort((a, b) => b.remainder - a.remainder)
+  for (const { index } of order) {
+    if (!remaining) break
+    if (shares[index].amount < lineTotals[index]) {
+      shares[index].amount++
+      remaining--
+    }
+  }
+  return shares.map((share) => share.amount)
+}
 
 function generateInvoice() {
   const date = new Date()
@@ -11,19 +32,39 @@ export async function completeSale(options: {
   items: CartItem[]
   cashierId: string
   cashierName: string
-  payments: { method: 'CASH' | 'UPI' | 'CARD' | 'OTHER'; amount: number }[]
+  payments: { method: SalePaymentMethod; amount: number }[]
   cashReceived: number
+  customerId?: string
+  billDiscount?: number
 }) {
-  return db.transaction('rw', [db.products, db.sales, db.saleItems, db.inventoryTransactions, db.syncQueue, db.auditLogs], async () => {
+  const sale = await db.transaction('rw', [db.products, db.customers, db.sales, db.saleItems, db.inventoryTransactions, db.syncQueue, db.auditLogs], async () => {
     for (const item of options.items) {
       const product = await db.products.get(item.productId)
       if (!product || !product.active) throw new Error(`${item.name} is inactive or unavailable`)
       if (product.currentStock < item.quantity) throw new Error(`Insufficient stock for ${item.name}`)
+      if (item.discountPerBottle < 0 || item.discountPerBottle > item.unitPrice) {
+        throw new Error(`Invalid per-bottle discount for ${item.name}`)
+      }
     }
+
+    const creditPayments = options.payments.filter((payment) => payment.method === 'BTC')
+    const creditAmount = creditPayments
+      .reduce((sum, payment) => sum + payment.amount, 0)
+    const customer = options.customerId ? await db.customers.get(options.customerId) : undefined
+    if (creditPayments.length && !customer) throw new Error('Select an existing customer for Bill to Credit')
 
     const idempotencyKey = crypto.randomUUID()
     const subtotal = options.items.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0)
-    const discount = options.items.reduce((sum, item) => sum + item.discount, 0)
+    const lineTotals = options.items.map((item) => (item.unitPrice - item.discountPerBottle) * item.quantity)
+    const itemDiscount = options.items.reduce((sum, item) => sum + item.discountPerBottle * item.quantity, 0)
+    const subtotalAfterItemDiscounts = lineTotals.reduce((sum, lineTotal) => sum + lineTotal, 0)
+    const requestedBillDiscount = Math.round(options.billDiscount ?? 0)
+    if (!Number.isFinite(requestedBillDiscount) || requestedBillDiscount < 0) {
+      throw new Error('Bill discount must be a non-negative amount')
+    }
+    const billDiscount = Math.min(requestedBillDiscount, subtotalAfterItemDiscounts)
+    const allocatedBillDiscount = allocateDiscount(billDiscount, lineTotals)
+    const discount = itemDiscount + billDiscount
     const total = subtotal - discount
     const paid = options.payments.reduce((sum, payment) => sum + payment.amount, 0)
     if (paid < total) throw new Error(`Payment short by ₹${((total - paid) / 100).toFixed(2)}`)
@@ -37,6 +78,8 @@ export async function completeSale(options: {
       invoiceNumber: generateInvoice(),
       cashierId: options.cashierId,
       cashierName: options.cashierName,
+      customerId: customer?.id,
+      customerName: customer?.name,
       createdAt: new Date().toISOString(),
       subtotal,
       discount,
@@ -49,7 +92,8 @@ export async function completeSale(options: {
     }
     await db.sales.add(sale)
 
-    for (const item of options.items) {
+    for (let index = 0; index < options.items.length; index++) {
+      const item = options.items[index]
       const product = await db.products.get(item.productId)
       if (!product) continue
       const newStock = product.currentStock - item.quantity
@@ -63,9 +107,10 @@ export async function completeSale(options: {
         quantity: item.quantity,
         unitPrice: item.unitPrice,
         purchasePrice: item.purchasePrice,
-        discount: item.discount,
+        purchasePriceStatus: item.purchasePriceStatus === 'verified' ? 'verified' : 'pending',
+        discount: item.discountPerBottle * item.quantity + allocatedBillDiscount[index],
         tax: 0,
-        total: item.unitPrice * item.quantity - item.discount,
+        total: lineTotals[index] - allocatedBillDiscount[index],
       })
       await db.inventoryTransactions.add({
         id: crypto.randomUUID(),
@@ -79,6 +124,12 @@ export async function completeSale(options: {
         userId: options.cashierId,
         createdAt: sale.createdAt,
         syncStatus: 'pending',
+      })
+    }
+    if (customer && creditAmount > 0) {
+      await db.customers.update(customer.id, {
+        creditBalance: customer.creditBalance + creditAmount,
+        updatedAt: sale.createdAt,
       })
     }
     await db.syncQueue.add({
@@ -101,4 +152,6 @@ export async function completeSale(options: {
     })
     return sale
   })
+  if (sale.customerId) window.dispatchEvent(new Event('winebar:customers-updated'))
+  return sale
 }

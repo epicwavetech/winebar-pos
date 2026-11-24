@@ -18,6 +18,15 @@ export interface Category {
   active: boolean
 }
 
+export interface Customer {
+  id: string
+  name: string
+  phone: string
+  creditBalance: number
+  createdAt: string
+  updatedAt: string
+}
+
 export interface Product {
   id: string
   name: string
@@ -27,6 +36,8 @@ export interface Product {
   barcode: string
   sku: string
   purchasePrice: number
+  purchasePriceStatus?: 'verified' | 'pending'
+  purchasePriceSource?: 'actual-invoice-payable' | 'configured-formula' | 'pending'
   sellingPrice: number
   mrp: number
   taxRate: number
@@ -48,13 +59,16 @@ export interface CartItem {
   quantity: number
   unitPrice: number
   purchasePrice: number
+  purchasePriceStatus?: 'verified' | 'pending'
   availableStock: number
-  discount: number
+  discountPerBottle: number
 }
+
+export type SalePaymentMethod = 'CASH' | 'UPI' | 'CARD' | 'OTHER' | 'BTC'
 
 export interface Payment {
   id: string
-  method: 'CASH' | 'UPI' | 'CARD' | 'OTHER'
+  method: SalePaymentMethod
   amount: number
 }
 
@@ -64,6 +78,8 @@ export interface Sale {
   invoiceNumber: string
   cashierId: string
   cashierName: string
+  customerId?: string
+  customerName?: string
   createdAt: string
   subtotal: number
   discount: number
@@ -85,6 +101,7 @@ export interface SaleItem {
   quantity: number
   unitPrice: number
   purchasePrice: number
+  purchasePriceStatus?: 'verified' | 'pending'
   discount: number
   tax: number
   total: number
@@ -111,6 +128,7 @@ export interface Purchase {
   createdAt: string
   supplierNote?: string
   total: number
+  costStatus?: 'verified' | 'pending'
   userId: string
   items: PurchaseItem[]
   syncStatus: 'pending' | 'synced' | 'error'
@@ -124,7 +142,54 @@ export interface PurchaseItem {
   bottleSize: string
   quantity: number
   purchaseRate: number
+  acquisitionCost?: number
+  costStatus?: 'verified' | 'pending'
+  costSource?: 'actual-invoice-payable' | 'configured-formula' | 'pending'
+  invoiceValues?: PurchaseInvoiceValues
+  formulaSnapshot?: CostFormulaConfig
   batchNumber?: string
+}
+
+export type CostFormulaComponent = 'totalMrp' | 'adValorem' | 'vatAmount' | 'tpfAmount' | 'otherCharges' | 'discount'
+
+export interface CostFormulaConfig {
+  enabled: boolean
+  verified: boolean
+  verifiedReference: string
+  components: Partial<Record<CostFormulaComponent, 'add' | 'subtract'>>
+  updatedAt?: string
+}
+
+export interface PurchaseInvoiceValues {
+  originalInputs: {
+    numberOfCases: string
+    bottlesPerCase: string
+    looseBottles: string
+    bottleSizeMl: string
+    mrpPerBottle: string
+    invoiceTotalMrp: string
+    adValorem: string
+    vatAmount: string
+    tpfAmount: string
+    otherCharges: string
+    discount: string
+    actualInvoicePayable: string
+  }
+  brandName: string
+  bottleSizeMl: number
+  numberOfCases: number
+  bottlesPerCase: number
+  looseBottles: number
+  totalBottles: number
+  mrpPerBottle: number
+  invoiceTotalMrp?: number
+  calculatedTotalMrp: number
+  adValorem: number
+  vatAmount: number
+  tpfAmount: number
+  otherCharges: number
+  discount: number
+  actualInvoicePayable?: number
 }
 
 export interface Expense {
@@ -148,6 +213,7 @@ export interface DailySettlement {
   upiSales: number
   cardSales: number
   otherSales: number
+  creditSales: number
   cashExpenses: number
   expectedCash: number
   actualCash: number

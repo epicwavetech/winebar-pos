@@ -120,3 +120,40 @@ button { cursor:pointer; }
   .metric-card strong{font-size:15px}
   .pos-search .barcode-box{display:flex}
 }
+.payment-methods{grid-template-columns:repeat(5,1fr)}
+.cart-item-discount{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:8px;color:var(--muted);font-size:10px}
+.cart-item-discount input{width:88px;height:30px;border:1px solid var(--border);border-radius:7px;background:var(--panel);color:var(--text);padding:0 7px}
+.bill-discount{display:grid;grid-template-columns:1fr 1fr;gap:6px;align-items:center;margin:5px 0 8px;font-size:11px}
+.bill-discount select,.bill-discount input,.payment-fields select{height:36px;border:1px solid var(--border);border-radius:8px;background:var(--panel);color:var(--text);padding:0 8px;min-width:0}
+.payment-fields select{height:42px}
+.credit-note{margin:8px 0 0;color:var(--muted);font-size:11px}
+.invoice-cost-fields{margin-top:14px;padding:14px;border:1px solid var(--border);border-radius:10px;background:var(--bg)}
+.invoice-cost-fields h3,.cost-formula-settings h2{margin:0 0 8px;font-size:14px}
+.cost-preview{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-top:12px}
+.cost-preview span{display:flex;flex-direction:column;gap:4px;padding:9px;border:1px solid var(--border);border-radius:8px;background:var(--panel);font-size:11px;color:var(--muted)}
+.cost-preview strong{font-size:13px;color:var(--text)}
+.cost-warning,.loss-warning{color:#b91c1c;font-weight:800}
+.cost-warning{margin:10px 0 0;padding:9px;border:1px solid #fecaca;border-radius:8px;background:#fff1f2;font-size:12px}
+.loss-warning{background:#fff1f2;border-radius:5px;padding:3px 6px}
+.product-cost-breakdown,.product-cost-warning,.product-cost-profit{display:block;font-size:10px;margin-top:3px}
+.product-cost-breakdown{color:var(--muted)}
+.product-cost-warning{color:#b91c1c;font-weight:800}
+.product-cost-profit{color:#166534}
+.stock-batch{display:flex;flex-direction:column;gap:12px;padding:14px;border:1px solid var(--border);border-radius:10px}
+.stock-batch-heading{display:flex;align-items:center;justify-content:space-between}
+.stock-form .stock-batch label{max-width:480px}
+.cost-formula-settings{display:flex;flex-direction:column;gap:10px;padding:14px;margin:12px 0;border:1px solid var(--border);border-radius:10px}
+.cost-formula-settings .settings-note{margin-bottom:0}
+.checkbox-setting{display:flex!important;flex-direction:row!important;align-items:center;gap:8px!important}
+.checkbox-setting input{width:16px;height:16px!important;margin:0}
+.formula-components{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.formula-components select{height:42px;border:1px solid var(--border);border-radius:8px;background:var(--panel);color:var(--text);padding:0 10px}
+.product-card{height:210px}
+@media(max-width:760px){.product-card{height:202px}.formula-components{grid-template-columns:1fr}}
+.invoice-audit-panel{margin-top:14px;padding:16px}
+.invoice-audit-panel h2{margin:0;font-size:15px}
+.invoice-audit-item{padding:14px 0;border-top:1px solid var(--border)}
+.invoice-audit-item p{color:var(--muted);font-size:12px}
+.invoice-audit-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px}
+.invoice-audit-grid span{padding:8px;border-radius:7px;background:var(--bg);font-size:11px;overflow-wrap:anywhere}
+@media(max-width:760px){.payment-methods{grid-template-columns:repeat(2,1fr)}}

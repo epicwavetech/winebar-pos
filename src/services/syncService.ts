@@ -1,5 +1,5 @@
 import { db } from '../db/database'
-import type { Category, Product } from '../types/models'
+import type { Category, Customer, Product } from '../types/models'
 
 export interface SyncResult {
   synced: number
@@ -32,6 +32,8 @@ interface CatalogResponse {
     barcode?: string | null
     sku?: string | null
     purchase_price?: number | string | null
+    purchase_price_status?: 'verified' | 'pending' | null
+    purchase_price_source?: 'actual-invoice-payable' | 'configured-formula' | 'pending' | null
     selling_price?: number | string | null
     mrp?: number | string | null
     tax_rate?: number | string | null
@@ -43,6 +45,15 @@ interface CatalogResponse {
     created_at?: string | null
     updated_at?: string | null
   }>
+}
+
+interface CustomerResponse {
+  id: string
+  name: string
+  phone?: string | null
+  credit_balance?: number | string | null
+  created_at?: string | null
+  updated_at?: string | null
 }
 
 async function send<T>(url: string, headers: Record<string, string>, body?: unknown): Promise<T> {
@@ -89,6 +100,8 @@ function fromCatalog(catalog: CatalogResponse) {
       barcode: product.barcode ?? '',
       sku: product.sku ?? '',
       purchasePrice: Number(product.purchase_price ?? 0),
+      purchasePriceStatus: product.purchase_price_status === 'verified' ? 'verified' : 'pending',
+      purchasePriceSource: product.purchase_price_source || 'pending',
       sellingPrice: Number(product.selling_price ?? 0),
       mrp: Number(product.mrp ?? 0),
       taxRate: Number(product.tax_rate ?? 0),
@@ -160,6 +173,43 @@ async function runSync(): Promise<SyncResult> {
     return { synced: 0, pending: await unsyncedCount(), error: `Catalog sync failed: ${error instanceof Error ? error.message : 'unknown error'}` }
   }
 
+  try {
+    const remoteCustomers = await send<CustomerResponse[]>(`${base}/customers`, headers)
+    await db.transaction('rw', db.customers, async () => {
+      const localCustomers = await db.customers.toArray()
+      const localById = new Map(localCustomers.map((customer) => [customer.id, customer]))
+      const customersToSave: Customer[] = remoteCustomers.map((remote) => {
+        const createdAt = remote.created_at ?? new Date().toISOString()
+        const remoteCustomer: Customer = {
+          id: remote.id,
+          name: remote.name,
+          phone: remote.phone ?? '',
+          creditBalance: Number(remote.credit_balance ?? 0),
+          createdAt,
+          updatedAt: remote.updated_at ?? createdAt,
+        }
+        const local = localById.get(remoteCustomer.id)
+        if (!local) return remoteCustomer
+        const remoteIsNewer = timestamp(remoteCustomer.updatedAt) >= timestamp(local.updatedAt)
+        return {
+          ...(remoteIsNewer ? remoteCustomer : local),
+          creditBalance: Math.max(local.creditBalance, remoteCustomer.creditBalance),
+        }
+      }).filter((remote) => {
+        const local = localById.get(remote.id)
+        return !local
+          || remote.name !== local.name
+          || remote.phone !== local.phone
+          || remote.creditBalance !== local.creditBalance
+          || remote.updatedAt !== local.updatedAt
+      })
+      if (customersToSave.length) await db.customers.bulkPut(customersToSave)
+    })
+    window.dispatchEvent(new Event('winebar:customers-updated'))
+  } catch (error) {
+    return { synced: 0, pending: await unsyncedCount(), error: `Customer sync failed: ${error instanceof Error ? error.message : 'unknown error'}` }
+  }
+
   // 3. Push queued records (failed ones are retried on the next sync)
   let synced = 0
   let failed = 0
@@ -181,9 +231,14 @@ async function runSync(): Promise<SyncResult> {
   for (const entry of recordsToSync) {
     try {
       let payload: unknown = null
+      if (entry.entityType === 'customer') payload = await db.customers.get(entry.entityId)
       if (entry.entityType === 'sale') {
         const sale = await db.sales.get(entry.entityId)
-        if (sale) payload = { ...sale, items: await db.saleItems.where('saleId').equals(sale.id).toArray() }
+        if (sale) payload = {
+          ...sale,
+          customer: sale.customerId ? await db.customers.get(sale.customerId) : undefined,
+          items: await db.saleItems.where('saleId').equals(sale.id).toArray(),
+        }
       }
       if (entry.entityType === 'purchase') payload = await db.purchases.get(entry.entityId)
       if (entry.entityType === 'settlement') payload = await db.settlements.get(entry.entityId)

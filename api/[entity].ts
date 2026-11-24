@@ -1,4 +1,4 @@
-// Vercel serverless function: handles /api/health, /api/catalog, /api/sales,
+// Vercel serverless function: handles /api/health, /api/catalog, /api/customers, /api/sales,
 // /api/purchases, /api/expenses, /api/settlements and /api/inventory.
 // Uses the Supabase SERVICE ROLE key (server-side only — never put it in a VITE_ variable).
 import { createClient } from '@supabase/supabase-js'
@@ -43,11 +43,16 @@ async function readAll(client: ReturnType<typeof supabase>, table: string) {
 }
 
 const toCategory = (c: Row) => ({ id: c.id, name: c.name, icon: c.icon ?? '', color: c.color ?? '#64748b', sort_order: c.sortOrder ?? 0, active: c.active ?? true })
+const toCustomer = (c: Row) => ({
+  id: c.id, name: c.name, phone: c.phone ?? '', created_at: c.createdAt,
+})
 
 const toProduct = (p: Row) => ({
   id: p.id, name: p.name, brand: p.brand ?? '', category_id: p.categoryId || null,
   bottle_size: p.bottleSize ?? '', barcode: p.barcode ?? '', sku: p.sku ?? '',
   purchase_price: p.purchasePrice ?? 0, selling_price: p.sellingPrice ?? 0, mrp: p.mrp ?? 0,
+  purchase_price_status: p.purchasePriceStatus === 'verified' ? 'verified' : 'pending',
+  purchase_price_source: p.purchasePriceSource ?? 'pending',
   tax_rate: p.taxRate ?? 0, opening_stock: p.openingStock ?? 0, current_stock: p.currentStock ?? 0,
   minimum_stock: p.minimumStock ?? 0, image: p.image ?? null, active: p.active ?? true,
   created_at: p.createdAt, updated_at: p.updatedAt ?? p.createdAt,
@@ -71,6 +76,9 @@ async function handle(request: Request): Promise<Response> {
       if (error) throw new Error(`Database check failed: ${error.message}`)
       return reply({ ok: true })
     }
+    if (request.method === 'GET' && entity === 'customers') {
+      return reply(await readAll(client, 'customers'))
+    }
     if (request.method === 'GET' && entity === 'catalog') {
       const [categories, products, reset] = await Promise.all([
         readAll(client, 'categories'),
@@ -84,6 +92,15 @@ async function handle(request: Request): Promise<Response> {
     const body = (await request.json()) as Row
 
     switch (entity) {
+      case 'customers': {
+        const { error } = await client.from('customers').upsert([toCustomer(body)], {
+          onConflict: 'id',
+          ignoreDuplicates: true,
+        })
+        if (error) throw new Error(`customers: ${error.message}`)
+        return reply({ ok: true })
+      }
+
       case 'catalog':
         await upsertChunks('categories', (body.categories ?? []).map(toCategory))
         await upsertChunks('products', (body.products ?? []).map(toProduct))
@@ -102,11 +119,14 @@ async function handle(request: Request): Promise<Response> {
       case 'purchases': {
         await upsertChunks('purchases', [{
           id: body.id, reference: body.reference, created_at: body.createdAt,
-          supplier_note: body.supplierNote ?? null, total: body.total ?? 0, user_id: body.userId ?? null,
+          supplier_note: body.supplierNote ?? null, total: body.total ?? 0, cost_status: body.costStatus ?? 'pending', user_id: body.userId ?? null,
         }])
         await upsertChunks('purchase_items', (body.items ?? []).map((i: Row) => ({
           id: i.id, purchase_id: body.id, product_id: i.productId || null, product_name: i.productName,
           bottle_size: i.bottleSize ?? '', quantity: i.quantity, purchase_rate: i.purchaseRate ?? 0,
+          acquisition_cost: i.acquisitionCost ?? 0,
+          cost_status: i.costStatus ?? 'pending', cost_source: i.costSource ?? 'pending',
+          invoice_values: i.invoiceValues ?? {}, formula_snapshot: i.formulaSnapshot ?? null,
           batch_number: i.batchNumber ?? null,
         })))
         return reply({ ok: true })
@@ -124,7 +144,7 @@ async function handle(request: Request): Promise<Response> {
         await upsertChunks('settlements', [{
           id: body.id, business_date: body.businessDate, opening_cash: body.openingCash ?? 0,
           cash_sales: body.cashSales ?? 0, upi_sales: body.upiSales ?? 0, card_sales: body.cardSales ?? 0,
-          other_sales: body.otherSales ?? 0, cash_expenses: body.cashExpenses ?? 0,
+          other_sales: body.otherSales ?? 0, credit_sales: body.creditSales ?? 0, cash_expenses: body.cashExpenses ?? 0,
           expected_cash: body.expectedCash ?? 0, actual_cash: body.actualCash ?? 0,
           shortage: body.shortage ?? 0, excess: body.excess ?? 0, total_bills: body.totalBills ?? 0,
           bottles_sold: body.bottlesSold ?? 0, status: body.status ?? 'open',

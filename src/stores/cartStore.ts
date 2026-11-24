@@ -3,10 +3,9 @@ import type { CartItem } from '../types/models'
 
 interface CartState {
   items: CartItem[]
-  discount: number
-  add: (item: Omit<CartItem, 'quantity' | 'discount'>) => string | null
+  add: (item: Omit<CartItem, 'quantity' | 'discountPerBottle'>) => string | null
   setQuantity: (productId: string, quantity: number) => void
-  setDiscount: (productId: string, discount: number) => void
+  setDiscountPerBottle: (productId: string, discount: number) => void
   remove: (productId: string) => void
   clear: () => void
   subtotal: () => number
@@ -15,7 +14,6 @@ interface CartState {
 
 export const useCartStore = create<CartState>((set, get) => ({
   items: [],
-  discount: 0,
   add: (item) => {
     const existing = get().items.find((value) => value.productId === item.productId)
     if (existing) {
@@ -25,7 +23,7 @@ export const useCartStore = create<CartState>((set, get) => ({
       ) })
     } else {
       if (item.availableStock < 1) return 'Product is out of stock'
-      set({ items: [...get().items, { ...item, quantity: 1, discount: 0 }] })
+      set({ items: [...get().items, { ...item, quantity: 1, discountPerBottle: 0 }] })
     }
     return null
   },
@@ -35,15 +33,17 @@ export const useCartStore = create<CartState>((set, get) => ({
       return { ...item, quantity: Math.min(Math.max(1, quantity), item.availableStock) }
     }) })
   },
-  setDiscount: (productId, discount) => {
+  setDiscountPerBottle: (productId, discount) => {
     set({ items: get().items.map((item) =>
-      item.productId === productId ? { ...item, discount: Math.max(0, discount) } : item,
+      item.productId === productId
+        ? { ...item, discountPerBottle: Math.min(item.unitPrice, Math.max(0, discount)) }
+        : item,
     ) })
   },
   remove: (productId) => set({ items: get().items.filter((item) => item.productId !== productId) }),
-  clear: () => set({ items: [], discount: 0 }),
+  clear: () => set({ items: [] }),
   subtotal: () => get().items.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0),
   total: () => get().items.reduce((sum, item) =>
-    sum + item.unitPrice * item.quantity - item.discount, 0,
+    sum + (item.unitPrice - item.discountPerBottle) * item.quantity, 0,
   ),
 }))

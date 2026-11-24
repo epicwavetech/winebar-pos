@@ -37,6 +37,16 @@ The app keeps working data in each device's IndexedDB so it can be used offline.
 
 After deploying, open **Settings** on every browser/device, enter the same `SYNC_API_KEY` value, and save. These sync settings are stored locally per browser; setting the key on a PC does not configure a phone. A product saved while online syncs immediately, and the shared catalog is downloaded the next time another device synchronizes. Offline changes sync when that device reconnects.
 
+Customer accounts and Bill-to-Credit checkout require the latest API deployment and the updated `supabase/schema.sql` to be run in Supabase. Customer accounts sync across devices; BTC sales increase the selected customer's outstanding balance. POS discounts support a fixed amount per bottle and either a percentage or fixed amount on the remaining bill.
+
+## Liquor purchase cost price
+
+Stock In and Add Product capture case quantity, bottle size, MRP, permit levies, other charges, discounts, invoice payable, and the original invoice values on the existing purchase-batch records. Bottle quantity and total MRP are calculated from cases, bottles per case, loose bottles, and MRP per bottle. The actual invoice payable is used as acquisition cost when present; permit MRP, Ad Valorem, VAT, and TPF are not added or converted into CP by default.
+
+No verified Assam retailer purchase-price formula is included. Without an actual invoice payable or an administrator-enabled formula verified against an applicable retailer invoice / official reference, CP is marked **Pending verification**. The formula is disabled by default and configured in Settings; its configuration is stored per browser and must be set on each device that records stock-in batches. Batch values and the formula snapshot used are retained for audit. The 96-bottle example calculates total MRP as ₹11,520 but leaves CP and profit/loss pending when actual payable is unknown.
+
+Products with unverified CP are excluded from inventory valuation and gross-profit calculations. POS and Products show CP as pending, and display a prominent loss warning when verified CP exceeds MRP. Run the updated `supabase/schema.sql` in Supabase before deploying the sync changes so product CP status and purchase-batch invoice data can be synchronized.
+
 To clear all products without older browser caches restoring them, deploy the catalog-reset sync code, close WineBar on all devices, then run this in the Supabase SQL editor:
 
 ```sql

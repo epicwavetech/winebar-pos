@@ -30,7 +30,7 @@ export function printSale(
     </style></head><body>
       <div class="center shop">${escapeHtml(shop.name)}</div><div class="center">${escapeHtml(shop.address)}</div><div class="center">${escapeHtml(shop.phone)}</div>
       ${shop.gst ? `<div class="center">GST: ${escapeHtml(shop.gst)}</div>` : ''}
-      <div class="line"></div><div>Invoice: ${escapeHtml(sale.invoiceNumber)}</div><div>Date: ${escapeHtml(new Date(sale.createdAt).toLocaleString('en-IN'))}</div><div>Cashier: ${escapeHtml(sale.cashierName)}</div><div class="line"></div>
+      <div class="line"></div><div>Invoice: ${escapeHtml(sale.invoiceNumber)}</div><div>Date: ${escapeHtml(new Date(sale.createdAt).toLocaleString('en-IN'))}</div><div>Cashier: ${escapeHtml(sale.cashierName)}</div>${sale.customerName ? `<div>Customer: ${escapeHtml(sale.customerName)}</div>` : ''}<div class="line"></div>
       ${items.map((item) => `<div>${escapeHtml(item.productName)} ${escapeHtml(item.bottleSize)}</div><div class="row"><span>${item.quantity} x ₹${(item.unitPrice / 100).toFixed(2)}</span><strong>₹${(item.total / 100).toFixed(2)}</strong></div>`).join('')}
       <div class="line"></div><div class="row"><span>Subtotal</span><span>₹${(sale.subtotal / 100).toFixed(2)}</span></div><div class="row"><span>Discount</span><span>-₹${(sale.discount / 100).toFixed(2)}</span></div><div class="row total"><span>Grand Total</span><span>₹${(sale.total / 100).toFixed(2)}</span></div>
       ${sale.payments.map((payment) => `<div class="row"><span>${escapeHtml(payment.method)}</span><span>₹${(payment.amount / 100).toFixed(2)}</span></div>`).join('')}

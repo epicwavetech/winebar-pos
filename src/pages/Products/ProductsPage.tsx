@@ -7,6 +7,20 @@ import { downloadCsv, exportExcel } from '../../services/exportService'
 import { synchronizePending } from '../../services/syncService'
 import { useAuthStore } from '../../stores/authStore'
 import BarcodeScanner from '../../components/BarcodeScanner'
+import { InvoiceCostFields } from '../../components/costing/InvoiceCostFields'
+import {
+  EMPTY_COST_FORMULA,
+  EMPTY_INVOICE_COST_DRAFT,
+  buildInvoiceValues,
+  calculatePurchaseCost,
+  formatRupees,
+  hasInvoiceQuantity,
+  invoiceQuantity,
+  isValidInvoiceDraft,
+  productCostMetrics,
+  type InvoiceCostDraft,
+} from '../../services/costingService'
+import type { CostFormulaConfig, Purchase, PurchaseItem } from '../../types/models'
 
 export default function ProductsPage() {
   const barcodeScannerRef = useRef<() => void>(() => {})
@@ -15,8 +29,11 @@ export default function ProductsPage() {
   const [search, setSearch] = useState('')
   const [open, setOpen] = useState(false)
   const [editingProduct, setEditingProduct] = useState<Product | null>(null)
-  const [form, setForm] = useState({ name: '', brand: '', categoryId: '', bottleSize: '750 ml', barcode: '', sku: '', purchasePrice: '', sellingPrice: '', mrp: '', openingStock: '' })
+  const [form, setForm] = useState({ name: '', brand: '', categoryId: '', bottleSize: '750 ml', barcode: '', sku: '', sellingPrice: '', mrp: '', openingStock: '' })
+  const [invoiceDraft, setInvoiceDraft] = useState<InvoiceCostDraft>({ ...EMPTY_INVOICE_COST_DRAFT })
+  const [formula, setFormula] = useState<CostFormulaConfig>(EMPTY_COST_FORMULA)
   const [importMessage, setImportMessage] = useState('')
+  const [formMessage, setFormMessage] = useState('')
   const currentUserId = useAuthStore((state) => state.user?.id || 'admin-1')
 
   const load = () => db.products.toArray().then(setProducts)
@@ -26,6 +43,7 @@ export default function ProductsPage() {
       db.categories.toArray().then(setCategories)
     }
     loadCatalog()
+    db.settings.get('costFormula').then((value) => value && setFormula({ ...EMPTY_COST_FORMULA, ...value, components: value.components || {} }))
     window.addEventListener('winebar:catalog-updated', loadCatalog)
     return () => window.removeEventListener('winebar:catalog-updated', loadCatalog)
   }, [])
@@ -42,7 +60,9 @@ export default function ProductsPage() {
 
   const beginAdd = () => {
     setEditingProduct(null)
-    setForm({ name: '', brand: '', categoryId: '', bottleSize: '750 ml', barcode: '', sku: '', purchasePrice: '', sellingPrice: '', mrp: '', openingStock: '' })
+    setForm({ name: '', brand: '', categoryId: '', bottleSize: '750 ml', barcode: '', sku: '', sellingPrice: '', mrp: '', openingStock: '' })
+    setInvoiceDraft({ ...EMPTY_INVOICE_COST_DRAFT })
+    setFormMessage('')
     setOpen(true)
   }
 
@@ -55,22 +75,46 @@ export default function ProductsPage() {
       bottleSize: product.bottleSize,
       barcode: product.barcode,
       sku: product.sku,
-      purchasePrice: (product.purchasePrice / 100).toFixed(2),
       sellingPrice: (product.sellingPrice / 100).toFixed(2),
       mrp: (product.mrp / 100).toFixed(2),
       openingStock: String(product.openingStock),
     })
+    setInvoiceDraft({ ...EMPTY_INVOICE_COST_DRAFT })
+    setFormMessage('')
     setOpen(true)
   }
 
   const save = async (event: React.FormEvent) => {
     event.preventDefault()
     const now = new Date().toISOString()
-    const openingStock = editingProduct?.openingStock ?? Number(form.openingStock || 0)
+    if (!editingProduct && !isValidInvoiceDraft(invoiceDraft)) {
+      setFormMessage('Enter valid non-negative invoice values and whole bottle/case quantities.')
+      return
+    }
+    const manualOpeningStock = Number(form.openingStock || 0)
+    if (!editingProduct && !hasInvoiceQuantity(invoiceDraft) && (!Number.isInteger(manualOpeningStock) || manualOpeningStock < 0)) {
+      setFormMessage('Opening stock must be a non-negative whole number of bottles.')
+      return
+    }
+    const hasBatchQuantity = hasInvoiceQuantity(invoiceDraft)
+    const openingStock = editingProduct?.openingStock ?? (
+      hasBatchQuantity ? invoiceQuantity(invoiceDraft) : manualOpeningStock
+    )
+    const hasInvoiceData = Object.values(invoiceDraft).some((value) => value !== '')
+    if (!editingProduct && hasInvoiceData && openingStock < 1) {
+      setFormMessage('Enter a positive opening bottle quantity before saving invoice details.')
+      return
+    }
+    const invoiceValues = !editingProduct && openingStock > 0
+      ? buildInvoiceValues(invoiceDraft, form.brand, form.bottleSize, Math.round(Number(form.mrp || 0) * 100), openingStock)
+      : undefined
+    const calculation = invoiceValues ? calculatePurchaseCost(invoiceValues, formula) : undefined
     const product: Product = {
       id: editingProduct?.id ?? crypto.randomUUID(), name: form.name, brand: form.brand, categoryId: form.categoryId,
       bottleSize: form.bottleSize, barcode: form.barcode, sku: form.sku,
-      purchasePrice: Math.round(Number(form.purchasePrice) * 100),
+      purchasePrice: editingProduct?.purchasePrice ?? calculation?.costPerBottle ?? 0,
+      purchasePriceStatus: editingProduct?.purchasePriceStatus ?? calculation?.status ?? 'pending',
+      purchasePriceSource: editingProduct?.purchasePriceSource ?? calculation?.source ?? 'pending',
       sellingPrice: Math.round(Number(form.sellingPrice) * 100),
       mrp: Math.round(Number(form.mrp) * 100),
       taxRate: editingProduct?.taxRate ?? 0, openingStock,
@@ -80,15 +124,51 @@ export default function ProductsPage() {
       createdAt: editingProduct?.createdAt ?? now,
       updatedAt: now,
     }
-    await db.transaction('rw', db.products, db.inventoryTransactions, async () => {
-      if (editingProduct) await db.products.put(product)
-      else await db.products.add(product)
-      if (!editingProduct && openingStock > 0) await db.inventoryTransactions.add({
-        id: crypto.randomUUID(), reference: `OPEN-${product.sku}`, productId: product.id, productName: product.name,
-        type: 'OPENING_STOCK', stockIn: openingStock, stockOut: 0, balance: openingStock,
-        userId: currentUserId, createdAt: product.createdAt, syncStatus: 'pending',
+    try {
+      await db.transaction('rw', db.products, db.inventoryTransactions, db.purchases, db.syncQueue, async () => {
+        if (editingProduct) await db.products.put(product)
+        else await db.products.add(product)
+        if (!editingProduct && openingStock > 0) await db.inventoryTransactions.add({
+          id: crypto.randomUUID(), reference: `OPEN-${product.sku}`, productId: product.id, productName: product.name,
+          type: 'OPENING_STOCK', stockIn: openingStock, stockOut: 0, balance: openingStock,
+          userId: currentUserId, createdAt: product.createdAt, syncStatus: 'pending',
+        })
+        if (!editingProduct && openingStock > 0 && invoiceValues && calculation) {
+          const purchaseId = crypto.randomUUID()
+          const reference = `OPEN-${Date.now().toString().slice(-8)}`
+          const item: PurchaseItem = {
+            id: crypto.randomUUID(),
+            purchaseId,
+            productId: product.id,
+            productName: product.name,
+            bottleSize: product.bottleSize,
+            quantity: openingStock,
+            purchaseRate: calculation.costPerBottle ?? 0,
+            acquisitionCost: calculation.acquisitionCost,
+            costStatus: calculation.status,
+            costSource: calculation.source,
+            invoiceValues,
+            formulaSnapshot: calculation.source === 'configured-formula' ? formula : undefined,
+          }
+          const purchase: Purchase = {
+            id: purchaseId,
+            reference,
+            createdAt: product.createdAt,
+            supplierNote: 'Opening stock batch',
+            total: calculation.acquisitionCost ?? 0,
+            costStatus: calculation.status,
+            userId: currentUserId,
+            items: [item],
+            syncStatus: 'pending',
+          }
+          await db.purchases.add(purchase)
+          await db.syncQueue.add({ id: crypto.randomUUID(), entityType: 'purchase', entityId: purchaseId, status: 'pending', createdAt: product.createdAt, attempts: 0 })
+        }
       })
-    })
+    } catch (error) {
+      setFormMessage(`Product could not be saved: ${error instanceof Error ? error.message : 'Storage error'}`)
+      return
+    }
     setOpen(false)
     setEditingProduct(null)
     load()
@@ -110,13 +190,13 @@ export default function ProductsPage() {
 
   const filtered = products.filter((product) => `${product.name} ${product.brand} ${product.barcode}`.toLowerCase().includes(search.toLowerCase()))
   const exportProducts = () => {
-    const headers = ['name','brand','categoryId','bottleSize','barcode','sku','purchasePrice','sellingPrice','mrp','openingStock','minimumStock','active']
-    const rows = filtered.map((product) => [product.name,product.brand,product.categoryId,product.bottleSize,product.barcode,product.sku,(product.purchasePrice/100).toFixed(2),(product.sellingPrice/100).toFixed(2),(product.mrp/100).toFixed(2),product.openingStock,product.minimumStock,product.active ? 'true' : 'false'])
+    const headers = ['name','brand','categoryId','bottleSize','barcode','sku','purchasePrice','purchasePriceStatus','sellingPrice','mrp','openingStock','minimumStock','active']
+    const rows = filtered.map((product) => [product.name,product.brand,product.categoryId,product.bottleSize,product.barcode,product.sku,product.purchasePriceStatus === 'verified' ? (product.purchasePrice/100).toFixed(2) : '',product.purchasePriceStatus || 'pending',(product.sellingPrice/100).toFixed(2),(product.mrp/100).toFixed(2),product.openingStock,product.minimumStock,product.active ? 'true' : 'false'])
     exportExcel('products.xlsx', 'Products', headers, rows)
   }
   const exportCsv = () => {
-    const headers = ['name','brand','categoryId','bottleSize','barcode','sku','purchasePrice','sellingPrice','mrp','openingStock','minimumStock','active']
-    const rows = filtered.map((product) => [product.name,product.brand,product.categoryId,product.bottleSize,product.barcode,product.sku,(product.purchasePrice/100).toFixed(2),(product.sellingPrice/100).toFixed(2),(product.mrp/100).toFixed(2),product.openingStock,product.minimumStock,product.active ? 'true' : 'false'])
+    const headers = ['name','brand','categoryId','bottleSize','barcode','sku','purchasePrice','purchasePriceStatus','sellingPrice','mrp','openingStock','minimumStock','active']
+    const rows = filtered.map((product) => [product.name,product.brand,product.categoryId,product.bottleSize,product.barcode,product.sku,product.purchasePriceStatus === 'verified' ? (product.purchasePrice/100).toFixed(2) : '',product.purchasePriceStatus || 'pending',(product.sellingPrice/100).toFixed(2),(product.mrp/100).toFixed(2),product.openingStock,product.minimumStock,product.active ? 'true' : 'false'])
     downloadCsv('products.csv', headers, rows)
   }
   const importProducts = async (file?: File) => {
@@ -135,6 +215,7 @@ export default function ProductsPage() {
             id: crypto.randomUUID(), name: String(row.name), brand: String(row.brand || ''),
             categoryId, bottleSize: String(row.bottleSize || '750 ml'), barcode: String(row.barcode),
             sku: String(row.sku || row.barcode), purchasePrice: Math.round(Number(row.purchasePrice || 0) * 100),
+            purchasePriceStatus: 'pending', purchasePriceSource: 'pending',
             sellingPrice: Math.round(Number(row.sellingPrice || 0) * 100), mrp: Math.round(Number(row.mrp || row.sellingPrice || 0) * 100),
             taxRate: 0, openingStock, currentStock: openingStock, minimumStock: Number(row.minimumStock || 10),
             active: String(row.active || 'true').toLowerCase() !== 'false',
@@ -161,8 +242,11 @@ export default function ProductsPage() {
       <div className="page-heading"><div><h1>Products</h1><p>{products.length} active and inactive products</p></div><div className="heading-actions"><label className="secondary file-button"><Upload size={16}/> Import<input type="file" accept=".csv,.xlsx,.xls" onChange={(event) => importProducts(event.target.files?.[0])}/></label><button className="secondary" onClick={exportCsv}><Download size={16}/> CSV</button><button className="secondary" onClick={exportProducts}><Download size={16}/> Excel</button><button className="primary" onClick={beginAdd}><Plus size={17}/> Add product</button></div></div>
       {importMessage && <div className="toast static-toast">{importMessage}<button onClick={() => setImportMessage('')}>×</button></div>}
       <div className="panel table-panel"><div className="table-toolbar"><div className="search-box"><Search size={17}/><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search products"/></div></div>
-        <table><thead><tr><th>Product</th><th>Brand</th><th>Size</th><th>Barcode</th><th>Purchase</th><th>MRP</th><th>Stock</th><th>Status</th><th>Actions</th></tr></thead>
-          <tbody>{filtered.map((product) => <tr key={product.id}><td><strong>{product.name}</strong></td><td>{product.brand}</td><td>{product.bottleSize}</td><td>{product.barcode}</td><td>₹{(product.purchasePrice / 100).toFixed(2)}</td><td>₹{(product.mrp / 100).toFixed(2)}</td><td><span className={product.currentStock <= product.minimumStock ? 'badge danger' : 'badge'}>{product.currentStock}</span></td><td><span className={product.active ? 'badge success' : 'badge'}>{product.active ? 'Active' : 'Inactive'}</span></td><td><div className="row-actions"><button className="secondary" onClick={() => beginEdit(product)} aria-label={`Edit ${product.name}`} title="Edit"><Pencil size={14}/></button>{product.active ? <button className="secondary danger-action" onClick={() => deleteProduct(product)} aria-label={`Delete ${product.name}`} title="Delete"><Trash2 size={14}/></button> : <button className="secondary" onClick={() => restoreProduct(product)} aria-label={`Restore ${product.name}`} title="Restore"><RotateCcw size={14}/></button>}</div></td></tr>)}</tbody>
+        <table><thead><tr><th>Product</th><th>Brand</th><th>Size</th><th>Barcode</th><th>CP</th><th>MRP</th><th>Profit/Loss</th><th>Stock</th><th>Status</th><th>Actions</th></tr></thead>
+          <tbody>{filtered.map((product) => {
+            const metrics = productCostMetrics(product)
+            return <tr key={product.id}><td><strong>{product.name}</strong></td><td>{product.brand}</td><td>{product.bottleSize}</td><td>{product.barcode}</td><td>{metrics.verified ? formatRupees(metrics.costPerBottle) : 'Pending verification'}</td><td>{formatRupees(product.mrp)}</td><td>{metrics.verified ? <span className={metrics.lossWarning ? 'loss-warning' : ''}>{formatRupees(metrics.profitLossPerBottle)}{metrics.profitPercentage === undefined ? '' : ` · ${metrics.profitPercentage.toFixed(2)}%`}{metrics.lossWarning ? ' · LOSS' : ''}</span> : '—'}</td><td><span className={product.currentStock <= product.minimumStock ? 'badge danger' : 'badge'}>{product.currentStock}</span></td><td><span className={product.active ? 'badge success' : 'badge'}>{product.active ? 'Active' : 'Inactive'}</span></td><td><div className="row-actions"><button className="secondary" onClick={() => beginEdit(product)} aria-label={`Edit ${product.name}`} title="Edit"><Pencil size={14}/></button>{product.active ? <button className="secondary danger-action" onClick={() => deleteProduct(product)} aria-label={`Delete ${product.name}`} title="Delete"><Trash2 size={14}/></button> : <button className="secondary" onClick={() => restoreProduct(product)} aria-label={`Restore ${product.name}`} title="Restore"><RotateCcw size={14}/></button>}</div></td></tr>
+          })}</tbody>
         </table>
       </div>
       {open && <div className="modal-backdrop"><form className="modal form-modal" onSubmit={save}><div className="modal-header"><h2>{editingProduct ? 'Edit product' : 'Add product'}</h2><button type="button" onClick={() => { setOpen(false); setEditingProduct(null) }}>×</button></div>
@@ -183,10 +267,21 @@ export default function ProductsPage() {
               />
             </div>
           </label>
-          {(['sku','bottleSize','purchasePrice','sellingPrice','mrp'] as const).map((field) => <label key={field}>{field.replace(/([A-Z])/g,' $1').replace(/^./, (s) => s.toUpperCase())}<input type={['purchasePrice','sellingPrice','mrp'].includes(field) ? 'number' : 'text'} step={['purchasePrice','sellingPrice','mrp'].includes(field) ? '0.01' : undefined} value={form[field]} onChange={(event) => setForm({ ...form, [field]: event.target.value })}/></label>)}
-          {!editingProduct && <label>Opening Stock<input type="number" value={form.openingStock} onChange={(event) => setForm({ ...form, openingStock: event.target.value })}/></label>}
+          {(['sku','bottleSize','sellingPrice','mrp'] as const).map((field) => <label key={field}>{field.replace(/([A-Z])/g,' $1').replace(/^./, (s) => s.toUpperCase())}<input type={['sellingPrice','mrp'].includes(field) ? 'number' : 'text'} step={['sellingPrice','mrp'].includes(field) ? '0.01' : undefined} value={form[field]} onChange={(event) => setForm({ ...form, [field]: event.target.value })}/></label>)}
+          {!editingProduct && <label>Opening stock (bottles, if not entered by cases)<input type="number" min="0" value={form.openingStock} onChange={(event) => setForm({ ...form, openingStock: event.target.value })}/></label>}
           <label>Category<select required value={form.categoryId} onChange={(event) => setForm({ ...form, categoryId: event.target.value })}><option value="">Select category</option>{categories.map((category) => <option value={category.id} key={category.id}>{category.name}</option>)}</select></label>
-        </div><button className="primary wide">{editingProduct ? 'Save changes' : 'Save product'}</button></form></div>}
+        </div>
+        {!editingProduct && <InvoiceCostFields
+          draft={invoiceDraft}
+          onChange={setInvoiceDraft}
+          brandName={form.brand}
+          bottleSize={form.bottleSize}
+          mrp={Math.round(Number(form.mrp || 0) * 100)}
+          formula={formula}
+          totalBottles={hasInvoiceQuantity(invoiceDraft) ? invoiceQuantity(invoiceDraft) : Math.floor(Number(form.openingStock || 0))}
+        />}
+        {formMessage && <p className="cost-warning" role="alert">{formMessage}</p>}
+        <button className="primary wide">{editingProduct ? 'Save changes' : 'Save product'}</button></form></div>}
     </div>
   )
 }

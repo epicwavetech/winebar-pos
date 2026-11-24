@@ -27,7 +27,7 @@ export default function ReportsPage() {
         })
         if (selected === 'Payment collections') {
           nextHeaders = ['Payment','Amount']
-          const methods = ['CASH','UPI','CARD','OTHER'] as const
+          const methods = ['CASH','UPI','CARD','OTHER','BTC'] as const
           nextRows = methods.map((method) => [method, (sales.flatMap((sale) => sale.payments).filter((payment) => payment.method === method).reduce((sum, payment) => sum + payment.amount, 0) / 100).toFixed(2)])
         } else if (selected === 'Product-wise sales' || selected === 'Brand-wise sales' || selected === 'Category-wise sales' || selected === 'Bottle-size-wise sales') {
           const saleItems = await db.saleItems.toArray()
@@ -49,8 +49,8 @@ export default function ReportsPage() {
       } else if (selected === 'Current stock' || selected === 'Low stock') {
         const products = await db.products.toArray()
         const filtered = selected === 'Low stock' ? products.filter((product) => product.currentStock <= product.minimumStock) : products
-        nextHeaders = ['Product','Brand','Size','Stock','Minimum','Value']
-        nextRows = filtered.map((product) => [product.name,product.brand,product.bottleSize,product.currentStock,product.minimumStock,(product.currentStock * product.purchasePrice / 100).toFixed(2)])
+        nextHeaders = ['Product','Brand','Size','Stock','Minimum','Verified value']
+        nextRows = filtered.map((product) => [product.name,product.brand,product.bottleSize,product.currentStock,product.minimumStock,product.purchasePriceStatus === 'verified' ? (product.currentStock * product.purchasePrice / 100).toFixed(2) : 'Pending verification'])
       } else if (selected === 'Stock-in' || selected === 'Inventory movement' || selected === 'Stock-out' || selected === 'Stock adjustments') {
         const transactions = (await db.inventoryTransactions.toArray()).filter((item) => {
           const time = new Date(item.createdAt).getTime()
@@ -68,12 +68,13 @@ export default function ReportsPage() {
         nextHeaders = ['Title','Date','Category','Payment','Amount']
         nextRows = expenses.map((item) => [item.title,item.date,item.category,item.paymentMethod,(item.amount/100).toFixed(2)])
       } else if (selected === 'Gross profit estimate') {
-        const sales = await db.sales.toArray()
         const items = await db.saleItems.toArray()
-        const gross = sales.reduce((sum, sale) => sum + sale.total, 0)
-        const cost = items.reduce((sum, item) => sum + item.purchasePrice * item.quantity, 0)
+        const verifiedItems = items.filter((item) => item.purchasePriceStatus === 'verified')
+        const gross = verifiedItems.reduce((sum, item) => sum + item.total, 0)
+        const cost = verifiedItems.reduce((sum, item) => sum + item.purchasePrice * item.quantity, 0)
+        const pendingBottles = items.filter((item) => item.purchasePriceStatus !== 'verified').reduce((sum, item) => sum + item.quantity, 0)
         nextHeaders = ['Metric','Amount']
-        nextRows = [['Gross sales',(gross/100).toFixed(2)],['Estimated product cost',(cost/100).toFixed(2)],['Estimated gross profit',((gross-cost)/100).toFixed(2)]]
+        nextRows = [['Sales with verified CP',(gross/100).toFixed(2)],['Verified product cost',(cost/100).toFixed(2)],['Estimated gross profit on verified-cost sales',((gross-cost)/100).toFixed(2)],['Bottles sold with CP pending verification',String(pendingBottles)]]
       } else {
         const settlements = (await db.settlements.toArray()).filter((item) => item.businessDate >= from && item.businessDate <= to)
         nextHeaders = ['Date','Opening Cash','Cash Sales','Expected Cash','Actual Cash','Status']

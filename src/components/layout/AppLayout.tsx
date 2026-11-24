@@ -21,6 +21,7 @@ const nav = [
   { to: '/inventory', label: 'Inventory', icon: Boxes },
   { to: '/purchases', label: 'Purchases', icon: ReceiptText },
   { to: '/sales', label: 'Sales', icon: CircleDollarSign },
+  { to: '/customers', label: 'Customers', icon: Users },
   { to: '/expenses', label: 'Expenses', icon: WalletCards },
   { to: '/settlement', label: 'Settlement', icon: WalletCards },
   { to: '/reports', label: 'Reports', icon: BarChart3 },
@@ -42,10 +43,20 @@ export default function AppLayout() {
   const primaryNav = visibleNav.filter(({ to }) => ['/dashboard', '/pos', '/products', '/inventory'].includes(to))
   const moreNav = visibleNav.filter(({ to }) => !['/dashboard', '/pos', '/products', '/inventory'].includes(to))
   useEffect(() => {
-    Promise.all([
-      db.syncQueue.where('status').anyOf('pending', 'error').count(),
-      db.inventoryTransactions.where('syncStatus').equals('pending').count(),
-    ]).then(([queued, ledger]) => setPending(queued + ledger))
+    const refreshPending = () => {
+      void Promise.all([
+        db.syncQueue.where('status').anyOf('pending', 'error').count(),
+        db.inventoryTransactions.where('syncStatus').equals('pending').count(),
+      ]).then(([queued, ledger]) => setPending(queued + ledger)).catch((error: unknown) => {
+        setSyncStatus({
+          message: `Could not load pending sync count: ${error instanceof Error ? error.message : 'Storage error'}`,
+          error: true,
+        })
+      })
+    }
+    refreshPending()
+    window.addEventListener('winebar:sync-pending-updated', refreshPending)
+    return () => window.removeEventListener('winebar:sync-pending-updated', refreshPending)
   }, [])
   useEffect(() => {
     const update = () => setOnline(navigator.onLine)
