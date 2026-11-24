@@ -47,7 +47,7 @@ set search_path = public, pg_temp
 as $$
 begin
   perform pg_advisory_xact_lock(hashtext('winebar-initial-admin'));
-  if exists (select 1 from public.users where role = 'ADMIN' and active = true) then
+  if exists (select 1 from public.users where role = 'ADMIN') then
     raise exception 'An administrator already exists' using errcode = '23505';
   end if;
   return query

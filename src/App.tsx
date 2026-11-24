@@ -20,7 +20,7 @@ import {
 import { db } from './db/database'
 import { useAuthStore, canAccess } from './stores/authStore'
 
-function Login({ setupRequired, onSetupComplete }: { setupRequired: boolean; onSetupComplete: () => void }) {
+function Login({ setupRequired, cloudStatusError, onSetupComplete }: { setupRequired: boolean; cloudStatusError: boolean; onSetupComplete: () => void }) {
   const [name, setName] = useState('')
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -95,6 +95,7 @@ function Login({ setupRequired, onSetupComplete }: { setupRequired: boolean; onS
     <div className="login-logo">W</div>
     <h1>WineBar POS</h1>
     <p>{setupRequired ? 'Create your administrator account' : 'Sign in to continue'}</p>
+    {cloudStatusError && !setupRequired && <div className="login-error" role="status">Cloud admin status is unavailable. Admin setup is disabled until the server can verify whether an account already exists.</div>}
     {setupRequired && <label>Your name<input value={name} onChange={(event) => setName(event.target.value)} autoComplete="name" autoFocus/></label>}
     <label>Username<input value={username} onChange={(event) => setUsername(event.target.value)} placeholder={setupRequired ? 'Choose a username' : 'Username'} autoComplete="username" autoFocus={!setupRequired}/></label>
     <label>Password<input type="password" maxLength={256} value={password} onChange={(event) => setPassword(event.target.value)} placeholder={setupRequired ? 'At least 8 characters' : 'Password'} autoComplete={setupRequired ? 'new-password' : 'current-password'}/></label>
@@ -135,18 +136,21 @@ function ProtectedLayout() {
 export default function App() {
   const [ready, setReady] = useState(false)
   const [setupRequired, setSetupRequired] = useState(false)
+  const [cloudStatusError, setCloudStatusError] = useState(false)
   const [startupError, setStartupError] = useState('')
   useEffect(() => {
     let active = true
-    seedDatabase().then(async (localSetupRequired) => {
-      let needsSetup = localSetupRequired
+    seedDatabase().then(async () => {
+      let needsSetup = false
+      let statusUnavailable = false
       try {
         needsSetup = (await checkCloudSetup()).setupRequired
       } catch {
-        // Existing local accounts remain available for offline sign-in.
+        statusUnavailable = true
       }
       if (!active) return
       setSetupRequired(needsSetup)
+      setCloudStatusError(statusUnavailable)
       setReady(true)
     }).catch((error: unknown) => {
       if (!active) return
@@ -156,7 +160,7 @@ export default function App() {
   }, [])
   if (startupError) return <div className="login-screen"><div className="login-card"><h1>WineBar POS</h1><p>Unable to initialize the application</p><div className="login-error">{startupError}</div></div></div>
   if (!ready) return <div className="login-screen"><div className="login-card"><h1>WineBar POS</h1><p>Loading...</p></div></div>
-  return <BrowserRouter><Routes><Route path="/login" element={<Login setupRequired={setupRequired} onSetupComplete={() => setSetupRequired(false)}/>}/><Route element={<ProtectedLayout/>}>
+  return <BrowserRouter><Routes><Route path="/login" element={<Login setupRequired={setupRequired} cloudStatusError={cloudStatusError} onSetupComplete={() => setSetupRequired(false)}/>}/><Route element={<ProtectedLayout/>}>
     <Route path="/" element={<Navigate to="/pos"/>}/><Route path="/dashboard" element={<DashboardPage/>}/><Route path="/pos" element={<POSPage/>}/><Route path="/customers" element={<CustomersPage/>}/>
     <Route path="/products" element={<ProductsPage/>}/><Route path="/categories" element={<CategoriesPage/>}/><Route path="/stock-in" element={<StockInPage/>}/><Route path="/stock-out" element={<StockOutPage/>}/><Route path="/adjustment" element={<AdjustmentPage/>}/><Route path="/inventory" element={<InventoryPage/>}/><Route path="/purchases" element={<PurchasesPage/>}/><Route path="/sales" element={<SalesPage/>}/><Route path="/expenses" element={<ExpensesPage/>}/><Route path="/settlement" element={<SettlementPage/>}/><Route path="/reports" element={<ReportsPage/>}/><Route path="/users" element={<UsersPage/>}/><Route path="/sync-settings" element={<SyncSettingsPage/>}/><Route path="/settings" element={<SettingsPage/>}/>
   </Route><Route path="*" element={<Navigate to="/pos"/>}/></Routes></BrowserRouter>

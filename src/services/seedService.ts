@@ -35,6 +35,5 @@ export async function seedDatabase() {
       await db.settings.put({ key: 'shop', shopName: 'WineBar Guwahati', address: 'Guwahati, Assam', phone: '', gst: '', businessBoundaryHour: 0, timezone: 'Asia/Kolkata' })
     }
 
-    return await db.users.where('role').equals('ADMIN').filter((user) => user.active).count() === 0
   })
 }

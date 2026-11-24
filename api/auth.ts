@@ -117,7 +117,7 @@ async function handle(request: Request) {
     const client = supabase()
 
     if (action === 'status') {
-      const { data, error } = await client.from('users').select('id').eq('role', 'ADMIN').eq('active', true).limit(1)
+      const { data, error } = await client.from('users').select('id').eq('role', 'ADMIN').limit(1)
       if (error) throw new Error(`users: ${error.message}`)
       return reply({ setupRequired: !data?.length })
     }
