@@ -35,7 +35,7 @@ See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rule
 
 The app keeps working data in each device's IndexedDB so it can be used offline. When online, products and categories are synchronized with the shared Supabase database through the Vercel `/api` endpoints. Deploy the app with `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and `SYNC_API_KEY` set in Vercel, and run [`supabase/schema.sql`](./supabase/schema.sql) in the Supabase SQL editor.
 
-After deploying, open **Settings** on every browser/device, enter the same `SYNC_API_KEY` value, and save. These sync settings are stored locally per browser; setting the key on a PC does not configure a phone. A product saved while online syncs immediately, and the shared catalog is downloaded the next time another device synchronizes. Offline changes sync when that device reconnects.
+After deploying, open **Device Sync** on each browser/device and enter the same `SYNC_API_KEY` value configured in Vercel. Cashiers can access Device Sync without access to shop-wide Settings. Sync credentials are stored locally per browser; setting the key on a PC does not configure a phone. Use the Sync button in the header to test the connection. A product saved while online syncs immediately, and the shared catalog is downloaded the next time another device synchronizes. Offline changes sync when that device reconnects.
 
 Customer accounts and Bill-to-Credit checkout require the latest API deployment and the updated `supabase/schema.sql` to be run in Supabase. Customer accounts sync across devices; BTC sales increase the selected customer's outstanding balance. POS discounts support a fixed amount per bottle and either a percentage or fixed amount on the remaining bill.
 

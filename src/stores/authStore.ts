@@ -15,9 +15,9 @@ export const useAuthStore = create<AuthState>((set) => ({
 
 export const rolePages: Record<UserRole, string[]> = {
   ADMIN: ['*'],
-  MANAGER: ['/dashboard','/pos','/products','/categories','/stock-in','/stock-out','/adjustment','/inventory','/purchases','/sales','/customers','/expenses','/settlement','/reports'],
-  CASHIER: ['/pos','/sales','/customers','/dashboard','/products','/categories','/stock-in','/stock-out','/adjustment','/inventory','/purchases','/reports'],
-  INVENTORY_STAFF: ['/products','/stock-in','/stock-out','/adjustment','/inventory','/purchases','/reports'],
+  MANAGER: ['/dashboard','/pos','/products','/categories','/stock-in','/stock-out','/adjustment','/inventory','/purchases','/sales','/customers','/expenses','/settlement','/reports','/sync-settings'],
+  CASHIER: ['/pos','/sales','/customers','/dashboard','/products','/categories','/stock-in','/stock-out','/adjustment','/inventory','/purchases','/reports','/sync-settings'],
+  INVENTORY_STAFF: ['/products','/stock-in','/stock-out','/adjustment','/inventory','/purchases','/reports','/sync-settings'],
 }
 
 export function canAccess(role: UserRole, path: string) {

@@ -9,6 +9,7 @@ import SettlementPage from './pages/Settlement/SettlementPage'
 import ReportsPage from './pages/Reports/ReportsPage'
 import UsersPage from './pages/Users/UsersPage'
 import SettingsPage from './pages/Settings/SettingsPage'
+import SyncSettingsPage from './pages/Settings/SyncSettingsPage'
 import CustomersPage from './pages/Customers/CustomersPage'
 import { CategoriesPage, StockInPage, StockOutPage, AdjustmentPage, PurchasesPage, SalesPage, ExpensesPage } from './pages/Operations/OperationsPages'
 import { seedDatabase } from './services/seedService'
@@ -66,6 +67,6 @@ export default function App() {
   useEffect(() => { seedDatabase() }, [])
   return <BrowserRouter><Routes><Route path="/login" element={<Login/>}/><Route element={<ProtectedLayout/>}>
     <Route path="/" element={<Navigate to="/pos"/>}/><Route path="/dashboard" element={<DashboardPage/>}/><Route path="/pos" element={<POSPage/>}/><Route path="/customers" element={<CustomersPage/>}/>
-    <Route path="/products" element={<ProductsPage/>}/><Route path="/categories" element={<CategoriesPage/>}/><Route path="/stock-in" element={<StockInPage/>}/><Route path="/stock-out" element={<StockOutPage/>}/><Route path="/adjustment" element={<AdjustmentPage/>}/><Route path="/inventory" element={<InventoryPage/>}/><Route path="/purchases" element={<PurchasesPage/>}/><Route path="/sales" element={<SalesPage/>}/><Route path="/expenses" element={<ExpensesPage/>}/><Route path="/settlement" element={<SettlementPage/>}/><Route path="/reports" element={<ReportsPage/>}/><Route path="/users" element={<UsersPage/>}/><Route path="/settings" element={<SettingsPage/>}/>
+    <Route path="/products" element={<ProductsPage/>}/><Route path="/categories" element={<CategoriesPage/>}/><Route path="/stock-in" element={<StockInPage/>}/><Route path="/stock-out" element={<StockOutPage/>}/><Route path="/adjustment" element={<AdjustmentPage/>}/><Route path="/inventory" element={<InventoryPage/>}/><Route path="/purchases" element={<PurchasesPage/>}/><Route path="/sales" element={<SalesPage/>}/><Route path="/expenses" element={<ExpensesPage/>}/><Route path="/settlement" element={<SettlementPage/>}/><Route path="/reports" element={<ReportsPage/>}/><Route path="/users" element={<UsersPage/>}/><Route path="/sync-settings" element={<SyncSettingsPage/>}/><Route path="/settings" element={<SettingsPage/>}/>
   </Route><Route path="*" element={<Navigate to="/pos"/>}/></Routes></BrowserRouter>
 }

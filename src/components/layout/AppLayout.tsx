@@ -26,6 +26,7 @@ const nav = [
   { to: '/settlement', label: 'Settlement', icon: WalletCards },
   { to: '/reports', label: 'Reports', icon: BarChart3 },
   { to: '/users', label: 'Users', icon: Users },
+  { to: '/sync-settings', label: 'Device Sync', icon: Wifi },
   { to: '/settings', label: 'Settings', icon: Settings },
 ]
 
