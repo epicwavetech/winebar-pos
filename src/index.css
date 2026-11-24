@@ -156,4 +156,11 @@ button { cursor:pointer; }
 .invoice-audit-item p{color:var(--muted);font-size:12px}
 .invoice-audit-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px}
 .invoice-audit-grid span{padding:8px;border-radius:7px;background:var(--bg);font-size:11px;overflow-wrap:anywhere}
+@media(min-width:761px){
+  .form-modal{overflow-y:scroll;scrollbar-width:thin;scrollbar-color:#7c3aed #eef0f4}
+  .form-modal::-webkit-scrollbar{width:12px}
+  .form-modal::-webkit-scrollbar-track{background:#eef0f4;border-radius:8px}
+  .form-modal::-webkit-scrollbar-thumb{background:#9ca3af;border:3px solid #eef0f4;border-radius:8px}
+  .form-modal::-webkit-scrollbar-thumb:hover{background:#7c3aed}
+}
 @media(max-width:760px){.payment-methods{grid-template-columns:repeat(2,1fr)}}
