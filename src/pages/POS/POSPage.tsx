@@ -27,13 +27,36 @@ export default function POSPage() {
   const authUser = useAuthStore((state) => state.user)
 
   useEffect(() => {
-    const loadCatalog = () => {
-      db.categories.toArray().then((items) => setCategories(items.filter((item) => item.active).sort((a, b) => a.sortOrder - b.sortOrder)))
-      db.products.toArray().then((items) => setProducts(items.filter((item) => item.active)))
+    let disposed = false
+    let loadId = 0
+    const loadCatalog = async () => {
+      const currentLoadId = ++loadId
+      const [categoryItems, productItems] = await Promise.all([
+        db.categories.toArray(),
+        db.products.toArray(),
+      ])
+      if (disposed || currentLoadId !== loadId) return
+      setCategories(categoryItems.filter((item) => item.active).sort((a, b) => a.sortOrder - b.sortOrder))
+      setProducts(productItems.filter((item) => item.active))
     }
-    loadCatalog()
-    window.addEventListener('winebar:catalog-updated', loadCatalog)
-    return () => window.removeEventListener('winebar:catalog-updated', loadCatalog)
+    const refreshCatalog = () => {
+      void loadCatalog().catch((error: unknown) => {
+        if (!disposed) setMessage(error instanceof Error ? `Could not load products: ${error.message}` : 'Could not load products')
+      })
+    }
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') refreshCatalog()
+    }
+    refreshCatalog()
+    window.addEventListener('winebar:catalog-updated', refreshCatalog)
+    window.addEventListener('focus', refreshCatalog)
+    document.addEventListener('visibilitychange', refreshWhenVisible)
+    return () => {
+      disposed = true
+      window.removeEventListener('winebar:catalog-updated', refreshCatalog)
+      window.removeEventListener('focus', refreshCatalog)
+      document.removeEventListener('visibilitychange', refreshWhenVisible)
+    }
   }, [])
 
   useEffect(() => {
