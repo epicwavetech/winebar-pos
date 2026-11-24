@@ -151,12 +151,14 @@ button { cursor:pointer; }
 .formula-components select{height:42px;border:1px solid var(--border);border-radius:8px;background:var(--panel);color:var(--text);padding:0 10px}
 .product-card{height:210px}
 @media(max-width:760px){.product-card{height:202px}.formula-components{grid-template-columns:1fr}}
+@media(max-width:760px){.device-sync-link{display:none}}
 .invoice-audit-panel{margin-top:14px;padding:16px}
 .invoice-audit-panel h2{margin:0;font-size:15px}
 .invoice-audit-item{padding:14px 0;border-top:1px solid var(--border)}
 .invoice-audit-item p{color:var(--muted);font-size:12px}
 .invoice-audit-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px}
 .invoice-audit-grid span{padding:8px;border-radius:7px;background:var(--bg);font-size:11px;overflow-wrap:anywhere}
+.device-sync-link{height:36px;display:flex;align-items:center;gap:7px;white-space:nowrap;padding:0 10px;font-size:12px}
 @media(min-width:761px){
   .form-modal{overflow-y:scroll;scrollbar-width:thin;scrollbar-color:#7c3aed #eef0f4}
   .form-modal::-webkit-scrollbar{width:12px}

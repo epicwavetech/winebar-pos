@@ -2,7 +2,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, ShoppingCart, Package, Tags, ArrowDownToLine, ArrowUpFromLine,
   SlidersHorizontal, Boxes, ReceiptText, WalletCards, CircleDollarSign,
-  Settings, Users, BarChart3, Moon, Sun, Wifi, WifiOff, MoreHorizontal,
+  Settings, Users, BarChart3, Moon, Sun, Wifi, WifiOff, MoreHorizontal, KeyRound,
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useAuthStore, canAccess } from '../../stores/authStore'
@@ -147,6 +147,7 @@ export default function AppLayout() {
             {dark ? <Sun size={18} /> : <Moon size={18} />}
           </button>
           <button className="icon-button sync-button" onClick={() => void syncNow(true)} aria-label={syncing ? 'Synchronizing' : 'Synchronize'} title={syncStatus?.message || 'Synchronize'} disabled={syncing}><RefreshCw size={17} className={syncing ? 'syncing-icon' : undefined}/></button>
+          <button className="secondary device-sync-link" onClick={() => navigate('/sync-settings')}><KeyRound size={16}/><span>Device Sync</span></button>
           <div className="cashier"><span>{(user?.name || 'U').slice(0, 2).toUpperCase()}</span><div><strong>{user?.name || 'User'}</strong><small>{user?.role || 'Offline'}</small></div></div>
           <button className="icon-button" onClick={signOut} aria-label="Log out" title="Log out"><LogOut size={17}/></button>
         </header>
