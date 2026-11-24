@@ -129,6 +129,7 @@ button { cursor:pointer; }
 .credit-note{margin:8px 0 0;color:var(--muted);font-size:11px}
 .invoice-cost-fields{margin-top:14px;padding:14px;border:1px solid var(--border);border-radius:10px;background:var(--bg)}
 .invoice-cost-fields h3,.cost-formula-settings h2{margin:0 0 8px;font-size:14px}
+.invoice-cost-fields .invoice-extra-heading{margin-top:16px}
 .cost-preview{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-top:12px}
 .cost-preview span{display:flex;flex-direction:column;gap:4px;padding:9px;border:1px solid var(--border);border-radius:8px;background:var(--panel);font-size:11px;color:var(--muted)}
 .cost-preview strong{font-size:13px;color:var(--text)}

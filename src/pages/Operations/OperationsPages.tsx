@@ -191,21 +191,20 @@ export function PurchasesPage() {
           </p>
         })()}
         {item.invoiceValues ? <div className="invoice-audit-grid">
-          <span>Brand: {item.invoiceValues.brandName}</span>
-          <span>Bottle size: {item.invoiceValues.bottleSizeMl} ml</span>
-          <span>Cases (entered): {item.invoiceValues.originalInputs.numberOfCases || 'Not provided'}</span>
-          <span>Bottles per case (entered): {item.invoiceValues.originalInputs.bottlesPerCase || 'Not provided'}</span>
-          <span>Loose bottles (entered): {item.invoiceValues.originalInputs.looseBottles || 'Not provided'}</span>
-          <span>MRP / bottle (entered): {item.invoiceValues.originalInputs.mrpPerBottle || 'Not provided'}</span>
-          <span>Effective MRP / bottle: ₹{(item.invoiceValues.mrpPerBottle/100).toFixed(2)}</span>
-          <span>Total MRP (calculated): ₹{(item.invoiceValues.calculatedTotalMrp/100).toFixed(2)}</span>
-          <span>Total MRP (invoice input): {item.invoiceValues.originalInputs.invoiceTotalMrp || 'Not provided'}</span>
-          <span>Ad Valorem (input): {item.invoiceValues.originalInputs.adValorem || 'Not provided'}</span>
-          <span>VAT (input): {item.invoiceValues.originalInputs.vatAmount || 'Not provided'}</span>
-          <span>TPF (input): {item.invoiceValues.originalInputs.tpfAmount || 'Not provided'}</span>
-          <span>Other charges (input): {item.invoiceValues.originalInputs.otherCharges || 'Not provided'}</span>
-          <span>Discount (input): {item.invoiceValues.originalInputs.discount || 'Not provided'}</span>
-          <span>Actual invoice payable: {item.invoiceValues.originalInputs.actualInvoicePayable || 'Not provided'}</span>
+          <span>Brand Name: {item.invoiceValues.brandName}</span>
+          <span>Case: {item.invoiceValues.originalInputs.numberOfCases || 'Not provided'}</span>
+          <span>Btls: {item.invoiceValues.originalInputs.looseBottles || 'Not provided'}</span>
+          <span>ML: {item.invoiceValues.bottleSizeMl}</span>
+          <span>BL: {(item.invoiceValues.totalBottles * item.invoiceValues.bottleSizeMl / 1000).toFixed(2)} (calculated)</span>
+          <span>Bottles per case (stock calculation): {item.invoiceValues.originalInputs.bottlesPerCase || 'Not provided'}</span>
+          <span>MRP: {item.invoiceValues.originalInputs.mrpPerBottle || 'Not provided'} per bottle</span>
+          <span>Total MRP: {item.invoiceValues.originalInputs.invoiceTotalMrp || `₹${(item.invoiceValues.calculatedTotalMrp/100).toFixed(2)} (calculated)`}</span>
+          <span>Ad Valorem: {item.invoiceValues.originalInputs.adValorem || 'Not provided'}</span>
+          <span>VAT Amount: {item.invoiceValues.originalInputs.vatAmount || 'Not provided'}</span>
+          <span>TPF Amount: {item.invoiceValues.originalInputs.tpfAmount || 'Not provided'}</span>
+          <span>Other Charges: {item.invoiceValues.originalInputs.otherCharges || 'Not provided'}</span>
+          <span>Discount: {item.invoiceValues.originalInputs.discount || 'Not provided'}</span>
+          <span>Actual Invoice Payable: {item.invoiceValues.originalInputs.actualInvoicePayable || 'Not provided'}</span>
           <span>Formula used: {item.costSource === 'configured-formula' ? item.formulaSnapshot?.verifiedReference || 'Configured formula' : 'None'}</span>
         </div> : <p>No invoice details were retained for this older purchase record.</p>}
       </section>)}

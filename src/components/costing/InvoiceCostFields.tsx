@@ -17,19 +17,22 @@ interface InvoiceCostFieldsProps {
   totalBottles?: number
 }
 
-const invoiceFields: Array<{ key: keyof InvoiceCostDraft; label: string; step?: string }> = [
-  { key: 'numberOfCases', label: 'Number of cases' },
-  { key: 'bottlesPerCase', label: 'Bottles per case' },
-  { key: 'looseBottles', label: 'Loose bottles' },
-  { key: 'bottleSizeMl', label: 'Bottle size (ml)' },
-  { key: 'mrpPerBottle', label: 'MRP per bottle (₹)', step: '0.01' },
-  { key: 'invoiceTotalMrp', label: 'Total MRP on invoice (₹)', step: '0.01' },
-  { key: 'adValorem', label: 'Ad Valorem levy (₹)', step: '0.01' },
-  { key: 'vatAmount', label: 'VAT amount (₹)', step: '0.01' },
-  { key: 'tpfAmount', label: 'TPF amount (₹)', step: '0.01' },
-  { key: 'otherCharges', label: 'Other charges (₹)', step: '0.01' },
+const permitFields: Array<{ key: keyof InvoiceCostDraft; label: string; step?: string }> = [
+  { key: 'numberOfCases', label: 'Case' },
+  { key: 'looseBottles', label: 'Btls' },
+  { key: 'bottleSizeMl', label: 'ML' },
+  { key: 'mrpPerBottle', label: 'MRP (per bottle, ₹)', step: '0.01' },
+  { key: 'invoiceTotalMrp', label: 'Total MRP (₹)', step: '0.01' },
+  { key: 'adValorem', label: 'Ad Valorem (₹)', step: '0.01' },
+  { key: 'vatAmount', label: 'VAT Amount (₹)', step: '0.01' },
+  { key: 'tpfAmount', label: 'TPF Amount (₹)', step: '0.01' },
+]
+
+const additionalFields: Array<{ key: keyof InvoiceCostDraft; label: string; step?: string }> = [
+  { key: 'bottlesPerCase', label: 'Bottles per case (stock calculation)' },
+  { key: 'otherCharges', label: 'Other Charges (₹)', step: '0.01' },
   { key: 'discount', label: 'Discount (₹)', step: '0.01' },
-  { key: 'actualInvoicePayable', label: 'Actual invoice payable (₹)', step: '0.01' },
+  { key: 'actualInvoicePayable', label: 'Actual Invoice Payable (₹)', step: '0.01' },
 ]
 
 export function InvoiceCostFields({ draft, onChange, brandName, bottleSize, mrp, formula, totalBottles }: InvoiceCostFieldsProps) {
@@ -38,22 +41,26 @@ export function InvoiceCostFields({ draft, onChange, brandName, bottleSize, mrp,
   const calculation = calculatePurchaseCost(invoiceValues, formula)
   const mrpMismatch = draft.invoiceTotalMrp !== ''
     && Math.round(Number(draft.invoiceTotalMrp) * 100) !== calculation.calculatedTotalMrp
+  const bulkLitres = quantity * invoiceValues.bottleSizeMl / 1000
+  const renderFields = (fields: Array<{ key: keyof InvoiceCostDraft; label: string; step?: string }>) =>
+    fields.map(({ key, label, step }) => (
+      <label key={key}>{label}<input
+        type="number"
+        min="0"
+        step={step}
+        value={draft[key]}
+        onChange={(event) => onChange({ ...draft, [key]: event.target.value })}
+      /></label>
+    ))
 
   return (
     <section className="invoice-cost-fields">
-      <h3>Excise permit / purchase invoice</h3>
-      <div className="form-grid">
-        {invoiceFields.map(({ key, label, step }) => (
-          <label key={key}>{label}<input
-            type="number"
-            min="0"
-            step={step}
-            value={draft[key]}
-            onChange={(event) => onChange({ ...draft, [key]: event.target.value })}
-          /></label>
-        ))}
-      </div>
+      <h3>Transport permit columns</h3>
+      <div className="form-grid">{renderFields(permitFields)}</div>
+      <h3 className="invoice-extra-heading">Additional invoice and stock details</h3>
+      <div className="form-grid">{renderFields(additionalFields)}</div>
       <div className="cost-preview">
+        <span>BL (calculated)<strong>{bulkLitres.toFixed(2)}</strong></span>
         <span>Total bottles<strong>{quantity}</strong></span>
         <span>Calculated total MRP<strong>{formatRupees(calculation.calculatedTotalMrp)}</strong></span>
         <span>Total purchase cost<strong>{calculation.status === 'verified' ? formatRupees(calculation.acquisitionCost) : 'Pending verification'}</strong></span>
