@@ -1,17 +1,11 @@
 import { db } from '../db/database'
 
+const legacySeededAccounts = [
+  { id: 'admin-1', pinHash: '240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9' },
+  { id: 'cashier-1', pinHash: 'b4c94003c562bb0d89535eca77f07284fe560fd48a7cc1ed99f0a56263d616ba' },
+]
+
 export async function seedDatabase() {
-  if (await db.users.count()) return
-  const hash = async (value: string) => {
-    const bytes = new TextEncoder().encode(value)
-    const digest = await crypto.subtle.digest('SHA-256', bytes)
-    return Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, '0')).join('')
-  }
-  const [adminHash, cashierHash] = await Promise.all([hash('admin123'), hash('cashier123')])
-  await db.users.bulkAdd([
-    { id: 'admin-1', name: 'Shop Admin', username: 'admin', role: 'ADMIN', active: true, pinHash: adminHash },
-    { id: 'cashier-1', name: 'Rahul Cashier', username: 'cashier', role: 'CASHIER', active: true, pinHash: cashierHash },
-  ])
   const categories = [
     ['cat-whisky', 'Whisky', '🥃', '#a855f7'],
     ['cat-rum', 'Rum', '◆', '#f97316'],
@@ -22,9 +16,25 @@ export async function seedDatabase() {
     ['cat-gin', 'Gin', '○', '#10b981'],
     ['cat-other', 'Other', '■', '#64748b'],
   ] as const
-  await db.categories.bulkAdd(categories.map(([id, name, icon, color], index) => ({
-    id, name, icon, color, sortOrder: index, active: true,
-  })))
 
-  await db.settings.put({ key: 'shop', shopName: 'WineBar Guwahati', address: 'Guwahati, Assam', phone: '', gst: '', businessBoundaryHour: 0, timezone: 'Asia/Kolkata' })
+  return db.transaction('rw', db.users, db.categories, db.settings, async () => {
+    for (const account of legacySeededAccounts) {
+      const user = await db.users.get(account.id)
+      if (user?.pinHash === account.pinHash) await db.users.delete(account.id)
+    }
+
+    for (const [sortOrder, [id, name, icon, color]] of categories.entries()) {
+      if (!await db.categories.get(id)) {
+        await db.categories.add({
+          id, name, icon, color, sortOrder, active: true,
+        })
+      }
+    }
+
+    if (!await db.settings.get('shop')) {
+      await db.settings.put({ key: 'shop', shopName: 'WineBar Guwahati', address: 'Guwahati, Assam', phone: '', gst: '', businessBoundaryHour: 0, timezone: 'Asia/Kolkata' })
+    }
+
+    return await db.users.where('role').equals('ADMIN').filter((user) => user.active).count() === 0
+  })
 }
