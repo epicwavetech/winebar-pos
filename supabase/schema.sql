@@ -30,6 +30,104 @@ create table if not exists public.users (
   created_at  timestamptz not null default now(),
   updated_at  timestamptz not null default now()
 );
+drop trigger if exists users_updated_at on public.users;
+create trigger users_updated_at before update on public.users
+  for each row execute function public.set_updated_at();
+
+create or replace function public.create_initial_admin(
+  p_id text,
+  p_name text,
+  p_username text,
+  p_pin_hash text
+)
+returns setof public.users
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+  perform pg_advisory_xact_lock(hashtext('winebar-initial-admin'));
+  if exists (select 1 from public.users where role = 'ADMIN' and active = true) then
+    raise exception 'An administrator already exists' using errcode = '23505';
+  end if;
+  return query
+    insert into public.users (id, name, username, role, active, pin_hash)
+    values (p_id, p_name, p_username, 'ADMIN', true, p_pin_hash)
+    returning *;
+end;
+$$;
+
+revoke all on function public.create_initial_admin(text, text, text, text) from public, anon, authenticated;
+grant execute on function public.create_initial_admin(text, text, text, text) to service_role;
+
+create table if not exists public.auth_login_attempts (
+  attempt_key       text primary key,
+  failure_count     integer not null default 0,
+  window_started_at timestamptz not null default now(),
+  locked_until      timestamptz
+);
+alter table public.auth_login_attempts enable row level security;
+
+create or replace function public.auth_login_is_locked(p_attempt_key text)
+returns boolean
+language sql
+security definer
+set search_path = public, pg_temp
+as $$
+  select exists (
+    select 1 from public.auth_login_attempts
+    where attempt_key = p_attempt_key and locked_until > now()
+  );
+$$;
+
+create or replace function public.record_auth_login_failure(p_attempt_key text)
+returns boolean
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  current_lock timestamptz;
+begin
+  insert into public.auth_login_attempts (attempt_key, failure_count, window_started_at)
+  values (p_attempt_key, 1, now())
+  on conflict (attempt_key) do update set
+    failure_count = case
+      when public.auth_login_attempts.window_started_at <= now() - interval '15 minutes' then 1
+      else public.auth_login_attempts.failure_count + 1
+    end,
+    window_started_at = case
+      when public.auth_login_attempts.window_started_at <= now() - interval '15 minutes' then now()
+      else public.auth_login_attempts.window_started_at
+    end,
+    locked_until = case
+      when case
+        when public.auth_login_attempts.window_started_at <= now() - interval '15 minutes' then 1
+        else public.auth_login_attempts.failure_count + 1
+      end >= 5 then now() + interval '15 minutes'
+      when public.auth_login_attempts.locked_until > now() then public.auth_login_attempts.locked_until
+      else null
+    end
+  returning locked_until into current_lock;
+  return current_lock is not null and current_lock > now();
+end;
+$$;
+
+create or replace function public.clear_auth_login_failures(p_attempt_key text)
+returns void
+language sql
+security definer
+set search_path = public, pg_temp
+as $$
+  delete from public.auth_login_attempts where attempt_key = p_attempt_key;
+$$;
+
+revoke all on function public.auth_login_is_locked(text) from public, anon, authenticated;
+revoke all on function public.record_auth_login_failure(text) from public, anon, authenticated;
+revoke all on function public.clear_auth_login_failures(text) from public, anon, authenticated;
+grant execute on function public.auth_login_is_locked(text) to service_role;
+grant execute on function public.record_auth_login_failure(text) to service_role;
+grant execute on function public.clear_auth_login_failures(text) to service_role;
 
 -- ---------- categories ----------
 create table if not exists public.categories (
@@ -257,8 +355,7 @@ create trigger settings_updated_at before update on public.settings
   for each row execute function public.set_updated_at();
 
 -- ---------- compatibility: relax constraints from the first version of this script ----------
--- The device (IndexedDB) is the source of truth and local users are not stored in Supabase,
--- so these server-side constraints would only make syncs fail.
+-- The device remains the source of truth for operation records. User accounts are stored in Supabase.
 alter table public.sales                  drop constraint if exists sales_cashier_id_fkey;
 alter table public.purchases              drop constraint if exists purchases_user_id_fkey;
 alter table public.inventory_transactions drop constraint if exists inventory_transactions_user_id_fkey;
@@ -420,6 +517,7 @@ insert into public.settings (key, value) values
   ('shop', '{"shopName":"WineBar Guwahati","address":"Guwahati, Assam","phone":"","gst":"","businessBoundaryHour":0,"timezone":"Asia/Kolkata"}')
 on conflict (key) do nothing;
 
--- Create your real login users yourself (don't ship default passwords):
--- insert into public.users (id, name, username, role, pin_hash)
--- values ('admin-1','Shop Admin','admin','ADMIN','<sha256-hex-of-pin>');
+-- The first admin is created through /api/auth after the initial setup check.
+-- Do not insert user records or plain-text passwords manually.
+
+notify pgrst, 'reload schema';

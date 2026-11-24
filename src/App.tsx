@@ -13,10 +13,12 @@ import SyncSettingsPage from './pages/Settings/SyncSettingsPage'
 import CustomersPage from './pages/Customers/CustomersPage'
 import { CategoriesPage, StockInPage, StockOutPage, AdjustmentPage, PurchasesPage, SalesPage, ExpensesPage } from './pages/Operations/OperationsPages'
 import { seedDatabase } from './services/seedService'
-import { hashPassword } from './services/authService'
+import {
+  AuthApiError, cacheUserForOffline, checkCloudSetup, hashPassword, loginCloud,
+  setupCloudAdmin, verifyPassword,
+} from './services/authService'
 import { db } from './db/database'
 import { useAuthStore, canAccess } from './stores/authStore'
-import type { User } from './types/models'
 
 function Login({ setupRequired, onSetupComplete }: { setupRequired: boolean; onSetupComplete: () => void }) {
   const [name, setName] = useState('')
@@ -51,38 +53,38 @@ function Login({ setupRequired, onSetupComplete }: { setupRequired: boolean; onS
           return
         }
 
-        const user: User = {
-          id: crypto.randomUUID(),
-          name: trimmedName,
-          username: normalizedUsername,
-          role: 'ADMIN',
-          active: true,
-          pinHash: await hashPassword(password),
-        }
-        await db.transaction('rw', db.users, async () => {
-          const adminCount = await db.users.where('role').equals('ADMIN').filter((existing) => existing.active).count()
-          if (adminCount > 0) throw new Error('An administrator account already exists. Reload the page and sign in.')
-          const users = await db.users.toArray()
-          if (users.some((existing) => existing.username.trim().toLowerCase() === normalizedUsername)) {
-            throw new Error('That username is already in use')
-          }
-          await db.users.add(user)
-        })
-        login(user)
+        const cloudResult = await setupCloudAdmin(trimmedName, normalizedUsername, password)
+        const user = await cacheUserForOffline(cloudResult.user, password)
+        sessionStorage.setItem('winebar-auth-token', cloudResult.accessToken)
+        login(user, cloudResult.accessToken)
         localStorage.setItem('winebar-user-id', user.id)
         onSetupComplete()
         navigate('/pos')
         return
       }
 
-      const pinHash = await hashPassword(password)
-      const user = await db.users.where('username').equals(username.trim()).first()
-      if (user?.active && user.pinHash === pinHash) {
-        login(user)
+      try {
+        const cloudResult = await loginCloud(username.trim(), password)
+        const user = await cacheUserForOffline(cloudResult.user, password)
+        sessionStorage.setItem('winebar-auth-token', cloudResult.accessToken)
+        login(user, cloudResult.accessToken)
         localStorage.setItem('winebar-user-id', user.id)
         navigate('/pos')
-      } else {
-        setError('Invalid username or password')
+      } catch (cloudError) {
+        if (!(cloudError instanceof AuthApiError) || ![0, 404, 502, 503, 504].includes(cloudError.status)) throw cloudError
+        const localUser = await db.users.where('username').equals(username.trim().toLowerCase()).first()
+        if (!localUser?.active || !await verifyPassword(password, localUser.pinHash)) {
+          setError('Cloud authentication is unavailable and this device has no saved offline login for that account')
+          return
+        }
+        if (localUser.pinHash && /^[a-f0-9]{64}$/i.test(localUser.pinHash)) {
+          localUser.pinHash = await hashPassword(password)
+          await db.users.put(localUser)
+        }
+        sessionStorage.removeItem('winebar-auth-token')
+        login(localUser)
+        localStorage.setItem('winebar-user-id', localUser.id)
+        navigate('/pos')
       }
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : 'Unable to complete sign in')
@@ -95,8 +97,8 @@ function Login({ setupRequired, onSetupComplete }: { setupRequired: boolean; onS
     <p>{setupRequired ? 'Create your administrator account' : 'Sign in to continue'}</p>
     {setupRequired && <label>Your name<input value={name} onChange={(event) => setName(event.target.value)} autoComplete="name" autoFocus/></label>}
     <label>Username<input value={username} onChange={(event) => setUsername(event.target.value)} placeholder={setupRequired ? 'Choose a username' : 'Username'} autoComplete="username" autoFocus={!setupRequired}/></label>
-    <label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder={setupRequired ? 'At least 8 characters' : 'Password'} autoComplete={setupRequired ? 'new-password' : 'current-password'}/></label>
-    {setupRequired && <label>Confirm password<input type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} autoComplete="new-password"/></label>}
+    <label>Password<input type="password" maxLength={256} value={password} onChange={(event) => setPassword(event.target.value)} placeholder={setupRequired ? 'At least 8 characters' : 'Password'} autoComplete={setupRequired ? 'new-password' : 'current-password'}/></label>
+    {setupRequired && <label>Confirm password<input type="password" maxLength={256} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} autoComplete="new-password"/></label>}
     {error && <div className="login-error">{error}</div>}
     <button className="primary wide">{setupRequired ? 'Create admin account' : 'Sign in'}</button>
   </form></div>
@@ -113,7 +115,7 @@ function ProtectedLayout() {
         const id = localStorage.getItem('winebar-user-id')
         if (id) {
           const restored = await db.users.get(id)
-          if (restored) login(restored)
+          if (restored) login(restored, sessionStorage.getItem('winebar-auth-token'))
           else localStorage.removeItem('winebar-user-id')
         }
       }
@@ -136,7 +138,13 @@ export default function App() {
   const [startupError, setStartupError] = useState('')
   useEffect(() => {
     let active = true
-    seedDatabase().then((needsSetup) => {
+    seedDatabase().then(async (localSetupRequired) => {
+      let needsSetup = localSetupRequired
+      try {
+        needsSetup = (await checkCloudSetup()).setupRequired
+      } catch {
+        // Existing local accounts remain available for offline sign-in.
+      }
       if (!active) return
       setSetupRequired(needsSetup)
       setReady(true)

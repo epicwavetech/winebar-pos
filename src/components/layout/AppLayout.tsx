@@ -70,6 +70,7 @@ export default function AppLayout() {
   }, [])
   const signOut = () => {
     localStorage.removeItem('winebar-user-id')
+    sessionStorage.removeItem('winebar-auth-token')
     useAuthStore.getState().logout()
     navigate('/login', { replace: true })
   }

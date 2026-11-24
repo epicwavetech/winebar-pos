@@ -2,7 +2,11 @@ import { useEffect, useState } from 'react'
 import { Plus } from 'lucide-react'
 import { db } from '../../db/database'
 import { Page, DataTable } from '../../components/ui/Shared'
-import { hashPassword } from '../../services/authService'
+import {
+  cacheUserForOffline, createCloudUser, listCloudUsers, setCloudUserPassword,
+  type CloudUser,
+} from '../../services/authService'
+import { useAuthStore } from '../../stores/authStore'
 import type { User, UserRole } from '../../types/models'
 
 type UserFormMode = 'create' | 'password' | null
@@ -10,7 +14,8 @@ type UserFormMode = 'create' | 'password' | null
 const roles: UserRole[] = ['ADMIN', 'MANAGER', 'CASHIER', 'INVENTORY_STAFF']
 
 export default function UsersPage() {
-  const [users, setUsers] = useState<User[]>([])
+  const [users, setUsers] = useState<CloudUser[]>([])
+  const accessToken = useAuthStore((state) => state.accessToken)
   const [mode, setMode] = useState<UserFormMode>(null)
   const [selectedUser, setSelectedUser] = useState<User | null>(null)
   const [name, setName] = useState('')
@@ -24,13 +29,28 @@ export default function UsersPage() {
 
   useEffect(() => {
     let active = true
-    db.users.toArray()
-      .then((loadedUsers) => { if (active) setUsers(loadedUsers) })
-      .catch((loadError: unknown) => {
+    const loadUsers = async () => {
+      try {
+        if (accessToken) {
+          const cloudUsers = await listCloudUsers(accessToken)
+          if (active) {
+            setUsers(cloudUsers)
+            setLoadingError('')
+          }
+        } else {
+          const localUsers = await db.users.toArray()
+          if (active) {
+            setUsers(localUsers.map((user) => ({ ...user, hasPassword: Boolean(user.pinHash) })))
+            setLoadingError('Sign in online to manage centralized user accounts')
+          }
+        }
+      } catch (loadError) {
         if (active) setLoadingError(loadError instanceof Error ? loadError.message : 'Unable to load users')
-      })
+      }
+    }
+    void loadUsers()
     return () => { active = false }
-  }, [])
+  }, [accessToken])
 
   const openCreate = () => {
     setSelectedUser(null)
@@ -82,35 +102,28 @@ export default function UsersPage() {
       setError('Passwords do not match')
       return
     }
+    if (!accessToken) {
+      setError('Sign in online as an administrator to manage centralized users')
+      return
+    }
 
     setSaving(true)
     try {
-      const pinHash = await hashPassword(password)
+      let cloudUser: CloudUser
       if (mode === 'create') {
-        const newUser: User = {
-          id: crypto.randomUUID(),
+        cloudUser = await createCloudUser(accessToken, {
           name: trimmedName,
           username: normalizedUsername,
           role,
-          active: true,
-          pinHash,
-        }
-        await db.transaction('rw', db.users, async () => {
-          const existingUsers = await db.users.toArray()
-          if (existingUsers.some((user) => user.username.trim().toLowerCase() === normalizedUsername)) {
-            throw new Error('That username is already in use')
-          }
-          await db.users.add(newUser)
+          password,
         })
       } else {
         if (!selectedUser) throw new Error('Select a user before setting a password')
-        await db.transaction('rw', db.users, async () => {
-          const updated = await db.users.update(selectedUser.id, { pinHash })
-          if (!updated) throw new Error('That user no longer exists')
-        })
+        cloudUser = await setCloudUserPassword(accessToken, selectedUser.id, password)
       }
 
-      setUsers(await db.users.toArray())
+      await cacheUserForOffline(cloudUser, password)
+      setUsers(await listCloudUsers(accessToken))
       setMode(null)
       setSelectedUser(null)
       setPassword('')
@@ -122,14 +135,14 @@ export default function UsersPage() {
     }
   }
 
-  return <Page title="Users" subtitle="Staff accounts, roles, and passwords" actions={<button className="primary" onClick={openCreate}><Plus size={16}/> Add user</button>}>
+  return <Page title="Users" subtitle="Staff accounts, roles, and passwords" actions={<button className="primary" onClick={openCreate} disabled={!accessToken}><Plus size={16}/> Add user</button>}>
     {loadingError && <div className="login-error">{loadingError}</div>}
     <DataTable headers={['Name', 'Username', 'Role', 'Status', 'Password']} rows={users.map((user) => [
       user.name,
       user.username,
       user.role,
       user.active ? 'Active' : 'Inactive',
-      <button key={`password-${user.id}`} className="secondary" type="button" onClick={() => openPassword(user)}>{user.pinHash ? 'Change password' : 'Set password'}</button>,
+      <button key={`password-${user.id}`} className="secondary" type="button" onClick={() => openPassword(user)} disabled={!accessToken}>{user.hasPassword ? 'Change password' : 'Set password'}</button>,
     ])}/>
     {mode && <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && closeForm()}>
       <form className="modal form-modal" onSubmit={(event) => void save(event)}>
@@ -143,8 +156,8 @@ export default function UsersPage() {
           <label>Role<select value={role} onChange={(event) => setRole(event.target.value as UserRole)}>{roles.map((userRole) => <option key={userRole} value={userRole}>{userRole.replace('_', ' ')}</option>)}</select></label>
         </div>}
         <div className="form-grid">
-          <label>Password<input required type="password" minLength={8} value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password"/></label>
-          <label>Confirm password<input required type="password" minLength={8} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} autoComplete="new-password"/></label>
+          <label>Password<input required type="password" minLength={8} maxLength={256} value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password"/></label>
+          <label>Confirm password<input required type="password" minLength={8} maxLength={256} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} autoComplete="new-password"/></label>
         </div>
         {error && <div className="login-error" role="alert">{error}</div>}
         <div className="heading-actions"><button className="secondary" type="button" onClick={closeForm} disabled={saving}>Cancel</button><button className="primary" disabled={saving}>{saving ? 'Saving...' : mode === 'create' ? 'Create user' : 'Save password'}</button></div>

@@ -7,6 +7,7 @@ export interface User {
   role: UserRole
   active: boolean
   pinHash?: string
+  hasPassword?: boolean
 }
 
 export interface Category {

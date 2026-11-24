@@ -3,14 +3,16 @@ import type { User, UserRole } from '../types/models'
 
 interface AuthState {
   user: User | null
-  login: (user: User) => void
+  accessToken: string | null
+  login: (user: User, accessToken?: string | null) => void
   logout: () => void
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
   user: null,
-  login: (user) => set({ user }),
-  logout: () => set({ user: null }),
+  accessToken: null,
+  login: (user, accessToken = null) => set({ user, accessToken }),
+  logout: () => set({ user: null, accessToken: null }),
 }))
 
 export const rolePages: Record<UserRole, string[]> = {
