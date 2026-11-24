@@ -4,6 +4,7 @@ import type { Category, Product } from '../types/models'
 export interface SyncResult {
   synced: number
   pending: number
+  catalogProducts?: number
   error?: string
   lastSuccess?: string
 }
@@ -110,6 +111,7 @@ export function synchronizePending(): Promise<SyncResult> {
 }
 
 async function runSync(): Promise<SyncResult> {
+  let catalogProducts: number | undefined
   const setting = await db.settings.get('sync')
   const base = (setting?.endpoint?.trim() || DEFAULT_ENDPOINT).replace(/\/$/, '')
   const apiKey: string = setting?.apiKey?.trim() || ''
@@ -138,6 +140,7 @@ async function runSync(): Promise<SyncResult> {
     await send(`${base}/catalog`, headers, { categories, products: changedProducts })
 
     const latestCatalog = fromCatalog(await send<CatalogResponse>(`${base}/catalog`, headers))
+    catalogProducts = latestCatalog.products.length
     const localById = new Map(products.map((product) => [product.id, product]))
     const latestRemoteIds = new Set(latestCatalog.products.map((product) => product.id))
     const productsToRemove = resetTime
@@ -220,6 +223,7 @@ async function runSync(): Promise<SyncResult> {
   return {
     synced,
     pending: await unsyncedCount(),
+    catalogProducts,
     lastSuccess: lastSuccess || undefined,
     error: ledgerError || (failed ? `${failed} record(s) failed to sync — will retry` : undefined),
   }

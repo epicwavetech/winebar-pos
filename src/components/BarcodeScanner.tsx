@@ -11,6 +11,7 @@ type BarcodeScannerProps = {
 export default function BarcodeScanner({ onScan, onOpenScannerReady, buttonLabel = 'Camera' }: BarcodeScannerProps) {
   const [open, setOpen] = useState(false)
   const [cameraError, setCameraError] = useState('')
+  const [cameraWarning, setCameraWarning] = useState('')
   const [soundError, setSoundError] = useState('')
   const videoRef = useRef<HTMLVideoElement>(null)
   const onScanRef = useRef(onScan)
@@ -21,6 +22,8 @@ export default function BarcodeScanner({ onScan, onOpenScannerReady, buttonLabel
   }, [onScan])
 
   const openScanner = useCallback(() => {
+    setCameraError('')
+    setCameraWarning('')
     setCameraError(!navigator.mediaDevices?.getUserMedia || !window.isSecureContext
       ? 'Camera scanning requires camera permission and a secure HTTPS connection.'
       : '')
@@ -90,8 +93,39 @@ export default function BarcodeScanner({ onScan, onOpenScannerReady, buttonLabel
           onScanRef.current(result.getText())
           setOpen(false)
         })
-        if (cancelled) startedControls.stop()
-        else controls = startedControls
+        if (cancelled) {
+          startedControls.stop()
+          return
+        }
+        controls = startedControls
+
+        const stream = video.srcObject
+        const track = stream instanceof MediaStream ? stream.getVideoTracks()[0] : undefined
+        if (!track) return
+
+        const capabilities = track.getCapabilities() as MediaTrackCapabilities & {
+          focusMode?: string[]
+          torch?: boolean
+        }
+        if (capabilities.focusMode?.includes('continuous')) {
+          try {
+            await track.applyConstraints({
+              advanced: [{ focusMode: 'continuous' } as MediaTrackConstraintSet],
+            })
+          } catch {
+            if (!cancelled) setCameraWarning('Could not enable continuous autofocus. The camera may still focus automatically.')
+          }
+        }
+        if (capabilities.torch) {
+          try {
+            if (startedControls.switchTorch) await startedControls.switchTorch(true)
+            else await track.applyConstraints({ advanced: [{ torch: true } as MediaTrackConstraintSet] })
+          } catch {
+            if (!cancelled) setCameraWarning((warning) => warning
+              ? `${warning} The camera flash could not be turned on.`
+              : 'Could not turn on the camera flash. You can continue scanning.')
+          }
+        }
       } catch (error: unknown) {
         if (cancelled) return
         setCameraError(error instanceof Error ? error.message : 'Could not start the camera. Check browser permissions.')
@@ -115,6 +149,7 @@ export default function BarcodeScanner({ onScan, onOpenScannerReady, buttonLabel
             <video ref={videoRef} autoPlay playsInline muted/>
             <p>Allow camera access and hold the barcode inside the camera view.</p>
             {cameraError && <div className="login-error">{cameraError}</div>}
+            {cameraWarning && <p className="camera-sound-warning">{cameraWarning}</p>}
             {soundError && <p className="camera-sound-warning">{soundError}</p>}
             <button type="button" className="secondary wide" onClick={() => setOpen(false)}>Close scanner</button>
           </div>

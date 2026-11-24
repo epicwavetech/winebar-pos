@@ -70,7 +70,7 @@ export default function AppLayout() {
       setSyncStatus(result.error
         ? { message: `Sync failed: ${result.error}`, error: true }
         : manual
-          ? { message: `Sync complete. ${result.synced} pending record(s) sent; ${result.pending} still pending.`, error: false }
+          ? { message: `Sync complete. Catalog: ${result.catalogProducts ?? 0} product(s); ${result.synced} pending record(s) sent; ${result.pending} still pending.`, error: false }
           : null)
     } catch (error) {
       setSyncStatus({
