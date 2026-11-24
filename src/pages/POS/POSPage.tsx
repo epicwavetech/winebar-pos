@@ -100,10 +100,16 @@ export default function POSPage() {
     setBarcode('')
   }, [products, addProduct])
 
-  const scanBarcode = () => {
+  const scanBarcode = useCallback(() => {
     handleBarcode(barcode)
     barcodeRef.current?.focus()
-  }
+  }, [barcode, handleBarcode])
+
+  useEffect(() => {
+    if (!barcode) return
+    const timer = window.setTimeout(scanBarcode, 150)
+    return () => window.clearTimeout(timer)
+  }, [barcode, scanBarcode])
 
   const checkout = async () => {
     if (!cart.items.length) { setMessage('Add at least one product'); return }
