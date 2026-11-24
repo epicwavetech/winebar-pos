@@ -28,8 +28,8 @@ export default function POSPage() {
 
   useEffect(() => {
     const loadCatalog = () => {
-      db.categories.where('active').equals(1).sortBy('sortOrder').then(setCategories)
-      db.products.where('active').equals(1).toArray().then(setProducts)
+      db.categories.toArray().then((items) => setCategories(items.filter((item) => item.active).sort((a, b) => a.sortOrder - b.sortOrder)))
+      db.products.toArray().then((items) => setProducts(items.filter((item) => item.active)))
     }
     loadCatalog()
     window.addEventListener('winebar:catalog-updated', loadCatalog)
@@ -114,7 +114,7 @@ export default function POSPage() {
       setCashReceived('')
       cart.clear()
       setMessage('Sale completed successfully')
-      db.products.where('active').equals(1).toArray().then(setProducts)
+      db.products.toArray().then((items) => setProducts(items.filter((item) => item.active)))
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Sale could not be completed')
     }

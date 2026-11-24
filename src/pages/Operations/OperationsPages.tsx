@@ -23,7 +23,7 @@ export function StockInPage() {
   const [products, setProducts] = useState<Product[]>([])
   const [items, setItems] = useState<{ productId: string; quantity: number; rate: number }[]>([])
   const userId = useAuthStore((state) => state.user?.id || 'admin-1')
-  useEffect(() => { db.products.where('active').equals(1).toArray().then(setProducts) }, [])
+  useEffect(() => { db.products.toArray().then((items) => setProducts(items.filter((item) => item.active))) }, [])
   const addLine = () => setItems([...items, { productId: '', quantity: 1, rate: 0 }])
   const save = async () => {
     if (!items.length || items.some((item) => !item.productId || item.quantity < 1)) return
@@ -46,7 +46,7 @@ export function StockInPage() {
       await db.syncQueue.add({ id: crypto.randomUUID(), entityType: 'purchase', entityId: id, status: 'pending', createdAt: purchase.createdAt, attempts: 0 })
     })
     setItems([])
-    setProducts(await db.products.where('active').equals(1).toArray())
+    setProducts((await db.products.toArray()).filter((item) => item.active))
   }
   return <Page title="Stock In" subtitle="Receive new inventory"><button className="primary" onClick={addLine}><Plus size={16}/> Add product</button>
     <div className="panel stock-form">{items.map((item, index) => <div className="stock-line" key={index}><select value={item.productId} onChange={(event) => setItems(items.map((value, i) => i === index ? { ...value, productId: event.target.value } : value))}><option value="">Select product</option>{products.map((product) => <option value={product.id} key={product.id}>{product.name} · {product.bottleSize}</option>)}</select><input type="number" min="1" value={item.quantity} onChange={(event) => setItems(items.map((value, i) => i === index ? { ...value, quantity: Number(event.target.value) } : value))} placeholder="Quantity"/><input type="number" min="0" step="0.01" value={item.rate || ''} onChange={(event) => setItems(items.map((value, i) => i === index ? { ...value, rate: Number(event.target.value) } : value))} placeholder="Rate (₹)"/></div>)}
@@ -60,7 +60,7 @@ export function StockOutPage() {
   const [quantity, setQuantity] = useState(1)
   const [reason, setReason] = useState('Damaged stock')
   const userId = useAuthStore((state) => state.user?.id || 'admin-1')
-  useEffect(() => { db.products.where('active').equals(1).toArray().then(setProducts) }, [])
+  useEffect(() => { db.products.toArray().then((items) => setProducts(items.filter((item) => item.active))) }, [])
   const save = async () => {
     const product = await db.products.get(productId)
     if (!product || quantity > product.currentStock) return
@@ -71,7 +71,7 @@ export function StockOutPage() {
       await db.inventoryTransactions.add({ id: crypto.randomUUID(), reference: `SO-${Date.now().toString().slice(-8)}`, productId: product.id, productName: product.name, type: reason === 'Expired stock' ? 'EXPIRED' : 'DAMAGE', stockIn: 0, stockOut: quantity, balance, reason, userId, createdAt, syncStatus: 'pending' })
     })
     setProductId(''); setQuantity(1)
-    setProducts(await db.products.where('active').equals(1).toArray())
+    setProducts((await db.products.toArray()).filter((item) => item.active))
   }
   return <Page title="Stock Out" subtitle="Remove stock for an authorized reason"><div className="panel stock-form"><label>Product<select value={productId} onChange={(event) => setProductId(event.target.value)}><option value="">Select product</option>{products.map((product) => <option key={product.id} value={product.id}>{product.name} · {product.bottleSize} ({product.currentStock})</option>)}</select></label><label>Quantity<input type="number" min="1" value={quantity} onChange={(event) => setQuantity(Number(event.target.value))}/></label><label>Reason<select value={reason} onChange={(event) => setReason(event.target.value)}><option>Damaged stock</option><option>Broken bottle</option><option>Expired stock</option><option>Internal consumption</option><option>Theft / missing stock</option><option>Stock correction</option><option>Other</option></select></label><button className="primary" onClick={save} disabled={!productId}>Confirm stock out</button></div></Page>
 }
@@ -81,7 +81,7 @@ export function AdjustmentPage() {
   const [productId, setProductId] = useState('')
   const [physical, setPhysical] = useState('')
   const userId = useAuthStore((state) => state.user?.id || 'admin-1')
-  useEffect(() => { db.products.where('active').equals(1).toArray().then(setProducts) }, [])
+  useEffect(() => { db.products.toArray().then((items) => setProducts(items.filter((item) => item.active))) }, [])
   const product = products.find((item) => item.id === productId)
   const difference = product && physical !== '' ? Number(physical) - product.currentStock : 0
   const save = async () => {
@@ -92,7 +92,7 @@ export function AdjustmentPage() {
       await db.products.update(product.id, { currentStock: actual, updatedAt: createdAt })
       await db.inventoryTransactions.add({ id: crypto.randomUUID(), reference: `ADJ-${Date.now().toString().slice(-8)}`, productId: product.id, productName: product.name, type: difference >= 0 ? 'ADJUSTMENT_IN' : 'ADJUSTMENT_OUT', stockIn: Math.max(0, difference), stockOut: Math.max(0, -difference), balance: actual, reason: 'Physical stock adjustment', userId, createdAt, syncStatus: 'pending' })
     })
-    setProducts(await db.products.where('active').equals(1).toArray())
+    setProducts((await db.products.toArray()).filter((item) => item.active))
   }
   return <Page title="Stock Adjustment" subtitle="Reconcile physical and system stock"><div className="panel stock-form"><label>Product<select value={productId} onChange={(event) => setProductId(event.target.value)}><option value="">Select product</option>{products.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.bottleSize}</option>)}</select></label>{product && <div className="adjustment-summary"><span>System stock<strong>{product.currentStock}</strong></span><span>Physical stock<strong>{physical || 0}</strong></span><span>Difference<strong className={difference < 0 ? 'negative' : ''}>{difference >= 0 ? '+' : ''}{difference}</strong></span></div>}<label>Physical quantity<input type="number" min="0" value={physical} onChange={(event) => setPhysical(event.target.value)}/></label><button className="primary" onClick={save} disabled={!productId}>Confirm adjustment</button></div></Page>
 }
