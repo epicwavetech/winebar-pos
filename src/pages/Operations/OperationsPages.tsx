@@ -3,7 +3,7 @@ import { Plus, Trash2 } from 'lucide-react'
 import { db } from '../../db/database'
 import { Page, DataTable } from '../../components/ui/Shared'
 import type { CostFormulaConfig, Expense, Product, Purchase, PurchaseItem } from '../../types/models'
-import { EMPTY_COST_FORMULA, EMPTY_INVOICE_COST_DRAFT, buildInvoiceValues, calculatePurchaseCost, invoiceQuantity, isValidInvoiceDraft, type InvoiceCostDraft } from '../../services/costingService'
+import { EMPTY_COST_FORMULA, EMPTY_INVOICE_COST_DRAFT, buildInvoiceValues, calculatePurchaseCost, hasInvoiceQuantity, invoiceQuantity, isValidInvoiceDraft, type InvoiceCostDraft } from '../../services/costingService'
 import { InvoiceCostFields } from '../../components/costing/InvoiceCostFields'
 import { printSale } from '../../services/printService'
 import { downloadCsv, exportExcel, exportPdf } from '../../services/exportService'
@@ -164,8 +164,135 @@ export function AdjustmentPage() {
 export function PurchasesPage() {
   const [items, setItems] = useState<Purchase[]>([])
   const [selected, setSelected] = useState<Purchase | null>(null)
-  useEffect(() => { db.purchases.reverse().toArray().then(setItems) }, [])
-  return <Page title="Purchases" subtitle="Stock-in history and retained invoice values">
+  const [formula, setFormula] = useState<CostFormulaConfig>(EMPTY_COST_FORMULA)
+  const [editingBatch, setEditingBatch] = useState<{
+    purchaseId: string
+    itemId: string
+    brandName: string
+    bottleSize: string
+    mrp: number
+    draft: InvoiceCostDraft
+  } | null>(null)
+  const [editMessage, setEditMessage] = useState('')
+  const isAdmin = useAuthStore((state) => state.user?.role === 'ADMIN')
+  const loadPurchases = async () => {
+    const purchases = await db.purchases.reverse().toArray()
+    setItems(purchases)
+    return purchases
+  }
+  useEffect(() => {
+    let disposed = false
+    const load = async () => {
+      const [purchases, value] = await Promise.all([
+        db.purchases.reverse().toArray(),
+        db.settings.get('costFormula'),
+      ])
+      if (disposed) return
+      setItems(purchases)
+      if (value) setFormula({ ...EMPTY_COST_FORMULA, ...value, components: value.components || {} })
+    }
+    void load().catch((error: unknown) => {
+      if (!disposed) setEditMessage(`Could not load purchase history: ${error instanceof Error ? error.message : 'Storage error'}`)
+    })
+    return () => { disposed = true }
+  }, [])
+  const beginBatchEdit = async (purchase: Purchase, item: PurchaseItem) => {
+    const product = await db.products.get(item.productId)
+    const originalInputs = item.invoiceValues?.originalInputs
+    const draft = { ...EMPTY_INVOICE_COST_DRAFT, ...originalInputs }
+    if (!hasInvoiceQuantity(draft)) draft.looseBottles = String(item.quantity)
+    setEditingBatch({
+      purchaseId: purchase.id,
+      itemId: item.id,
+      brandName: item.invoiceValues?.brandName || product?.brand || '',
+      bottleSize: item.bottleSize,
+      mrp: item.invoiceValues?.mrpPerBottle ?? product?.mrp ?? 0,
+      draft,
+    })
+    setEditMessage('')
+  }
+  const saveBatchEdit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!editingBatch || !isValidInvoiceDraft(editingBatch.draft)) {
+      setEditMessage('Enter valid non-negative invoice values and whole bottle/case quantities.')
+      return
+    }
+    const purchase = await db.purchases.get(editingBatch.purchaseId)
+    const item = purchase?.items.find((value) => value.id === editingBatch.itemId)
+    if (!purchase || !item) {
+      setEditMessage('This purchase batch could not be found. Refresh the Purchases page and try again.')
+      return
+    }
+    if (invoiceQuantity(editingBatch.draft) !== item.quantity) {
+      setEditMessage(`The invoice quantity must remain ${item.quantity} bottles. Use Stock Adjustment to change recorded stock quantity.`)
+      return
+    }
+    const invoiceValues = buildInvoiceValues(
+      editingBatch.draft,
+      editingBatch.brandName,
+      editingBatch.bottleSize,
+      editingBatch.mrp,
+      item.quantity,
+    )
+    const calculation = calculatePurchaseCost(invoiceValues, formula)
+    const updatedItems = purchase.items.map((value) => value.id === item.id ? {
+      ...value,
+      purchaseRate: calculation.costPerBottle ?? 0,
+      acquisitionCost: calculation.acquisitionCost,
+      costStatus: calculation.status,
+      costSource: calculation.source,
+      invoiceValues,
+      formulaSnapshot: calculation.source === 'configured-formula' ? formula : undefined,
+    } : value)
+    const total = updatedItems.reduce((sum, value) => sum + (value.acquisitionCost ?? 0), 0)
+    const costStatus = updatedItems.every((value) => value.costStatus === 'verified') ? 'verified' : 'pending'
+    const updatedAt = new Date().toISOString()
+    try {
+      await db.transaction('rw', db.products, db.purchases, db.syncQueue, async () => {
+        await db.purchases.update(purchase.id, {
+          items: updatedItems,
+          total,
+          costStatus,
+          syncStatus: 'pending',
+        })
+        const allPurchases = await db.purchases.toArray()
+        const latestPurchase = allPurchases
+          .filter((entry) => entry.items.some((entryItem) => entryItem.productId === item.productId))
+          .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]
+        const latestItem = latestPurchase?.items.find((entryItem) => entryItem.productId === item.productId)
+        if (latestItem?.id === item.id) {
+          await db.products.update(item.productId, {
+            purchasePrice: calculation.costPerBottle ?? 0,
+            purchasePriceStatus: calculation.status,
+            purchasePriceSource: calculation.source,
+            updatedAt,
+          })
+        }
+        const queued = await db.syncQueue.where('entityType').equals('purchase')
+          .and((entry) => entry.entityId === purchase.id && entry.status !== 'synced')
+          .first()
+        if (queued) {
+          await db.syncQueue.update(queued.id, { status: 'pending', lastError: undefined })
+        } else {
+          await db.syncQueue.add({
+            id: crypto.randomUUID(),
+            entityType: 'purchase',
+            entityId: purchase.id,
+            status: 'pending',
+            createdAt: updatedAt,
+            attempts: 0,
+          })
+        }
+      })
+      const purchases = await loadPurchases()
+      setSelected(purchases.find((value) => value.id === purchase.id) || null)
+      setEditingBatch(null)
+      setEditMessage('')
+    } catch (error) {
+      setEditMessage(`Could not save invoice changes: ${error instanceof Error ? error.message : 'Storage error'}`)
+    }
+  }
+  return <Page title="Purchases" subtitle="Stock-in history and invoice verification — Admin can edit a batch from Review values">
     <div className="panel table-panel"><table><thead><tr>{['Reference','Date','Verified cost','Cost status','Sync','Invoice'].map((header) => <th key={header}>{header}</th>)}</tr></thead><tbody>
       {items.map((item) => <tr key={item.id}>
         <td><strong>{item.reference}</strong></td>
@@ -181,6 +308,7 @@ export function PurchasesPage() {
       {selected.items.map((item) => <section className="invoice-audit-item" key={item.id}>
         <strong>{item.productName} · {item.bottleSize}</strong>
         <p>Quantity: {item.quantity} bottles · CP: {item.costStatus === 'verified' ? `₹${(item.purchaseRate/100).toFixed(2)} per bottle · Total purchase cost ₹${((item.acquisitionCost ?? 0)/100).toFixed(2)} (${item.costSource})` : 'Pending verification'}</p>
+        {isAdmin && <button className="secondary" onClick={() => void beginBatchEdit(selected, item)}>Edit / verify invoice</button>}
         {item.costStatus === 'verified' && item.invoiceValues && (() => {
           const profitLoss = item.invoiceValues.mrpPerBottle - item.purchaseRate
           const percentage = item.purchaseRate > 0 ? profitLoss / item.purchaseRate * 100 : undefined
@@ -208,6 +336,23 @@ export function PurchasesPage() {
           <span>Formula used: {item.costSource === 'configured-formula' ? item.formulaSnapshot?.verifiedReference || 'Configured formula' : 'None'}</span>
         </div> : <p>No invoice details were retained for this older purchase record.</p>}
       </section>)}
+    </div>}
+    {editingBatch && <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && setEditingBatch(null)}>
+      <form className="modal form-modal" onSubmit={(event) => void saveBatchEdit(event)}>
+        <div className="modal-header"><div><small>Admin verification</small><h2>Edit purchase invoice</h2></div><button type="button" onClick={() => setEditingBatch(null)} aria-label="Close">×</button></div>
+        <p className="settings-note">Recorded stock quantity is locked by validation. Correct invoice fields here; use Stock Adjustment for quantity changes. CP becomes verified only from actual invoice payable or the configured verified formula.</p>
+        <label>Brand Name<input value={editingBatch.brandName} onChange={(event) => setEditingBatch({ ...editingBatch, brandName: event.target.value })}/></label>
+        <InvoiceCostFields
+          draft={editingBatch.draft}
+          onChange={(draft) => setEditingBatch({ ...editingBatch, draft })}
+          brandName={editingBatch.brandName}
+          bottleSize={editingBatch.bottleSize}
+          mrp={editingBatch.mrp}
+          formula={formula}
+        />
+        {editMessage && <p className="cost-warning" role="alert">{editMessage}</p>}
+        <button className="primary wide" type="submit">Save and recalculate CP</button>
+      </form>
     </div>}
   </Page>
 }

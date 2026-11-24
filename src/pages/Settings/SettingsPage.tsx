@@ -91,7 +91,7 @@ export default function SettingsPage() {
   }
 
   return (
-    <Page title="Settings" subtitle="Shop and operational configuration">
+    <Page title="Settings" subtitle="Admin cost formula verification and shop settings">
       <form className="panel settings-panel" onSubmit={save}>
         <div className="form-grid">
           <label>Shop name<input value={form.shopName} onChange={(event) => setForm({ ...form, shopName: event.target.value })}/></label>
@@ -107,6 +107,7 @@ export default function SettingsPage() {
         <p className="settings-note">Receipts print at 80mm through the browser dialog. Connect the USB printer and select it with 80mm paper configured.</p>
         <section className="cost-formula-settings">
           <h2>Verified purchase cost formula</h2>
+          <p className="settings-note">To verify or correct an individual purchase batch, open Purchases → Review values → Edit / verify invoice. This section verifies the formula used when invoice payable is missing.</p>
           <p className="settings-note">Actual invoice payable always takes precedence. Permit MRP and levy fields are not treated as cost unless you configure and verify the exact formula first.</p>
           <p className="settings-note">This formula is stored in this browser. Configure it on each device that records stock-in batches.</p>
           <label className="checkbox-setting"><input type="checkbox" checked={costFormula.enabled} onChange={(event) => setCostFormula({ ...costFormula, enabled: event.target.checked })}/> Use configured formula when actual invoice payable is missing</label>
